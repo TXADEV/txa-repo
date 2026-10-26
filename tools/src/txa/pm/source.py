@@ -73,6 +73,7 @@ class Source:
         self._token = token
         self._index: dict | None = None
         self._packages: dict | None = None
+        self._pending: list[dict] | None = None
         self.used_fallback = False
 
     @classmethod
@@ -122,6 +123,25 @@ class Source:
         if self._index is None:
             self._index = self._get_json("index.json") or {"packages": []}
         return self._index
+
+    def pending(self) -> list[dict]:
+        """Packages whose pull request is open (the index's pending.json); empty for sources that do not publish it."""
+        if self._pending is None:
+            data = self._get_json("pending.json") if self.local is None else None
+            self._pending = [e for e in (data or {}).get("packages", []) if isinstance(e, dict) and e.get("id") and e.get("version")]
+        return self._pending
+
+    def find_pending(self, query: str, version: str | None = None) -> dict | None:
+        lowered = query.lower()
+        namespaced = f"{config.get('namespace')}.{query}".lower()
+        hits = []
+        for entry in self.pending():
+            names = {str(entry["id"]).lower(), str(entry.get("alias") or "").lower(),
+                     *(str(a).lower() for a in entry.get("aliases", []))}
+            if (lowered in names or str(entry["id"]).lower() == namespaced) and (not version or entry["version"] == version):
+                hits.append(entry)
+        valid = [h for h in hits if semver.is_valid(h["version"])]
+        return max(valid, key=lambda h: semver.parse(h["version"])) if valid else (hits[0] if hits else None)
 
     def find(self, query: str) -> str | None:
         """Exact id, alias or <namespace>.<query> in this source's index, else None."""
@@ -210,6 +230,34 @@ class Source:
         return chosen, assemble(bundle)
 
 
+class LocalRelease:
+    """One release folder on disk (``txapm install --manifest <folder>``) - for testing a manifest before submitting it."""
+
+    name = "local"
+    allow_lan = False
+    used_fallback = False
+
+    def __init__(self, folder: Path):
+        self.folder = Path(folder)
+        self.bundle = Bundle.read(self.folder)
+        if not self.bundle.package_id or not self.bundle.version:
+            raise SourceError(f"{self.folder}: no readable core.txa.yaml")
+        problems = [f"{name}: {text}" for name, items in self.bundle.problems.items() for text in items]
+        if problems or not self.bundle.build or not self.bundle.default_about():
+            raise SourceError(f"{self.folder} is not a complete manifest: " + ("; ".join(problems) or
+                              "it needs core.txa.yaml, build.txa.yaml and an about card"))
+
+    @property
+    def package_id(self) -> str:
+        return self.bundle.package_id
+
+    def release(self, package_id: str, version: str | None = None) -> tuple[str, dict]:
+        return self.bundle.version, assemble(self.bundle)
+
+    def download_headers(self, url: str) -> dict:
+        return {}
+
+
 class Sources:
     """All enabled sources, queried in priority order (the official source first)."""
 
@@ -247,6 +295,31 @@ class Sources:
             return hits[0]
         first = self.items[0]
         return first, first.resolve(query)  # lets the official GitHub fallback try
+
+    def find_pending(self, query: str, version: str | None = None) -> tuple["Source", dict] | None:
+        for source in self.items:
+            try:
+                entry = source.find_pending(query, version)
+            except Exception:  # an unreachable source must not hide the others
+                continue
+            if entry:
+                return source, entry
+        return None
+
+    def pending_matching(self, text: str) -> list[tuple["Source", dict]]:
+        words = text.lower().replace("-", " ").split()
+        out = []
+        for source in self.items:
+            try:
+                entries = source.pending()
+            except Exception:
+                continue
+            for entry in entries:
+                haystack = " ".join([str(entry["id"]), str(entry.get("alias") or ""), " ".join(entry.get("aliases", [])),
+                                     str(entry.get("name", "")), str(entry.get("summary", ""))]).lower().replace("-", " ")
+                if all(word in haystack for word in words):
+                    out.append((source, entry))
+        return out
 
     def search(self, text: str) -> list[tuple[Source, dict]]:
         out = []

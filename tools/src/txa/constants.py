@@ -40,5 +40,6 @@ LABELS = {
     "review": ("txa:awaiting-review", "fbca04", "Waiting for a TXA moderator to approve"),
     "approved": ("txa:approved", "0e8a16", "A code owner approved - merges as soon as the checks are green"),
     "published": ("txa:published", "6f42c1", "Merged - available through txapm after the index refresh"),
+    "confirm": ("txa:needs-confirmation", "e99695", "The contributor still has to tick the checklist in the description"),
     "infra": ("txa:infra-change", "5319e7", "Touches files outside manifests/ - admin review only"),
 }

@@ -74,6 +74,26 @@ class TargetDraft:
 
 
 @dataclass
+class Item:
+    """One downloaded installer while the user is still answering questions about it."""
+
+    url: str
+    dl: object  # net.Download
+    found: engines.Inspection
+    engine: str
+    arch: str
+    arch_known: bool = False  # True when the file itself (or its name) says which CPU it targets
+    switches: dict = field(default_factory=dict)
+    mirrors: list = field(default_factory=list)
+    portable: dict = field(default_factory=dict)
+
+    def target(self) -> "TargetDraft":
+        return TargetDraft(self.url, self.arch, self.engine, self.dl.sha256, self.dl.bytes, self.dl.path,
+                           {} if self.engine == "portable" else dict(self.switches), list(self.mirrors),
+                           dict(self.portable))
+
+
+@dataclass
 class Draft:
     package_id: str
     version: str

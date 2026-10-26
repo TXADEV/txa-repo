@@ -120,8 +120,10 @@ def cmd_gate(args) -> int:
             raise SystemExit("txaci gate progress: --pr and --head-sha are required")
         return progress.watch(gh, repo, args.pr, args.head_sha)
     if args.action == "lifecycle":
+        if args.backfill:
+            return gate.backfill(gh, repo)
         if not (args.pr or args.head_sha):
-            raise SystemExit("txaci gate lifecycle: --pr or --head-sha is required")
+            raise SystemExit("txaci gate lifecycle: --pr, --head-sha or --backfill is required")
         return gate.lifecycle(gh, repo, pr_number=args.pr, head_sha=args.head_sha, closed=args.closed, merged=args.merged)
     merger = GitHub(os.environ.get("TXA_MERGE_TOKEN") or token)
     return gate.merge_gate(gh, merger, repo, state, report, args.run_url)
@@ -130,8 +132,19 @@ def cmd_gate(args) -> int:
 def cmd_build_api(args) -> int:
     from txa.ci.api import build_api
 
-    result = build_api(Path(args.root), Path(args.out))
-    print(f"published {result['packages']} package(s) to {result['out']}")
+    waiting = None
+    if args.pending:
+        from txa.ci import pending
+        from txa.core.github import GitHub, GitHubError
+
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        repo = os.environ.get("GITHUB_REPOSITORY")
+        try:
+            waiting = pending.collect(GitHub(token), repo) if repo else None
+        except GitHubError as exc:
+            print(f"::warning::could not list the pull requests waiting for review ({exc})")
+    result = build_api(Path(args.root), Path(args.out), waiting)
+    print(f"published {result['packages']} package(s) and {result['pending']} waiting for review to {result['out']}")
     for item in result["skipped"]:
         print(f"::warning title=Skipped release::{item['path']}: {'; '.join(item['problems'])}")
     return 0
@@ -184,11 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pr", type=int, help="progress / lifecycle: pull request number")
     p.add_argument("--closed", action="store_true", help="lifecycle: the pull request was closed")
     p.add_argument("--merged", action="store_true", help="lifecycle: ... by merging")
+    p.add_argument("--backfill", action="store_true", help="lifecycle: fix every closed PR that still carries in-flight labels")
     p.set_defaults(func=cmd_gate)
 
     p = sub.add_parser("build-api", help="generate the static txa.v1 JSON API")
     p.add_argument("--root", default=".")
     p.add_argument("--out", default="site")
+    p.add_argument("--pending", action="store_true", help="also list packages in open pull requests (needs GH_TOKEN, GITHUB_REPOSITORY)")
     p.set_defaults(func=cmd_build_api)
 
     p = sub.add_parser("schema", help="print the JSON schema of a card kind")

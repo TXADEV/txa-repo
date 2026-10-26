@@ -183,6 +183,7 @@ Write-Row 'txapm install hellotool --version 1.4.2'    'a specific version (an a
 Write-Row 'txapm install <id> --progress'              'unattended, installer progress window shown'
 Write-Row 'txapm install <id> --interactive'           'the installer''s normal wizard'
 Write-Row 'txapm install <id> --download-only'         'only download + verify'
+Write-Row 'txapm install --manifest <folder>'          'test a manifest from disk before submitting it'
 Write-Row 'txapm list'                                 'packages installed through txapm'
 Write-Row 'txapm list --upgrade-available'             'only those with a newer version'
 Write-Row 'txapm list --all'                           'every program on this PC, matched to TXA'

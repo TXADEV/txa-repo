@@ -19,20 +19,20 @@ NEEDS_URL = {"Proprietary", "Freeware", "Shareware", "Commercial"}
 
 # (identifier, one-line explanation) shown as a numbered menu by txacreate
 COMMON = [
-    ("MIT", "permissive, very short"),
-    ("Apache-2.0", "permissive, with a patent grant"),
-    ("BSD-3-Clause", "permissive"),
-    ("BSD-2-Clause", "permissive, simpler"),
-    ("ISC", "permissive, MIT-like"),
-    ("GPL-3.0-or-later", "copyleft: derived work must stay open (v3 or newer)"),
-    ("GPL-2.0-or-later", "copyleft (v2 or newer)"),
-    ("LGPL-3.0-or-later", "weak copyleft, usable as a library"),
-    ("AGPL-3.0-or-later", "copyleft that also covers network use"),
-    ("MPL-2.0", "file-level copyleft"),
-    ("Unlicense", "public domain"),
-    ("CC0-1.0", "public domain dedication"),
-    ("Freeware", "closed source, free to use (needs a link to the terms)"),
-    ("Proprietary", "closed source / commercial (needs a link to the terms)"),
+    ("MIT", "Very permissive: anyone may use, change and sell it, just keep the notice"),
+    ("Apache-2.0", "Permissive plus an explicit patent grant; keep notices, state your changes"),
+    ("BSD-3-Clause", "Permissive; you may not use the author's name to promote derived products"),
+    ("BSD-2-Clause", "Permissive and simpler: only the notice must be kept"),
+    ("ISC", "Permissive, like MIT but even shorter"),
+    ("GPL-3.0-or-later", "Copyleft: programs built on it must also be GPL (version 3 or newer)"),
+    ("GPL-2.0-or-later", "Copyleft: programs built on it must also be GPL (version 2 or newer)"),
+    ("LGPL-3.0-or-later", "Weak copyleft: other programs may link to it, changes to the library stay open"),
+    ("AGPL-3.0-or-later", "Strongest copyleft: also applies when the software is used over a network"),
+    ("MPL-2.0", "File-level copyleft: changes to its files stay open, the rest of your program does not"),
+    ("Unlicense", "Public domain: no conditions at all"),
+    ("CC0-1.0", "Public domain dedication"),
+    ("Freeware", "Closed source but free to use - you must give a link to the terms"),
+    ("Proprietary", "Closed source / commercial - you must give a link to the terms"),
 ]
 
 _ALIASES = {

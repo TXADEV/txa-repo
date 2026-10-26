@@ -172,6 +172,7 @@ $labels = @(
     @('txa:validating', 'bfd4f2', 'The TXA bot is running its checks right now'),
     @('txa:verified-build', '2ea44f', 'All automated TXA checks passed'),
     @('txa:fix-required', 'd93f0b', 'At least one automated TXA check failed'),
+    @('txa:needs-confirmation', 'e99695', 'The pull request checklist is not fully ticked yet'),
     @('txa:awaiting-review', 'fbca04', 'Waiting for a TXA moderator to approve'),
     @('txa:approved', '0e8a16', 'A code owner approved - merges as soon as the checks are green'),
     @('txa:published', '6f42c1', 'Merged - available through txapm after the index refresh'),

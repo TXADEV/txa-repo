@@ -12,7 +12,8 @@ on:
     workflows: ["TXA Review Signal"]
     types: [completed]
   pull_request_target:
-    types: [closed]
+    types: [closed, edited]   # edited: the contributor ticked a box in the description
+  workflow_dispatch:         # run once to fix labels of old pull requests (backfill)
 
 permissions:
   contents: read
@@ -43,7 +44,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check ./tools
 
       - name: Pull request closed or merged
-        if: github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -58,3 +59,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: txaci gate lifecycle --head-sha "$HEAD_SHA"
+
+      - name: Description edited (checklist)
+        if: github.event_name == 'pull_request_target' && github.event.action == 'edited'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: txaci gate lifecycle --pr "$PR_NUMBER"
+
+      - name: Backfill old pull requests
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: txaci gate lifecycle --backfill

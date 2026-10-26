@@ -14,7 +14,7 @@ import json
 import re
 from pathlib import Path
 
-from txa.ci.report import render_markdown
+from txa.ci.report import confirm_note, render_markdown
 from txa.constants import LABELS, REPORT_MARKER, STATUS_CONTEXT
 from txa.core.github import GitHub, GitHubError
 
@@ -105,13 +105,19 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         wanted.add(_label("fix"))
         state, description = "error", reason or "validation did not complete"
 
+    # the contributor must tick the checklist in the description; until then nothing may merge
+    open_boxes = checklist(pr.get("body"))
+    if open_boxes and state == "success":
+        wanted.add(_label("confirm"))
+        state, description = "pending", f"Waiting for the contributor to tick {len(open_boxes)} checklist box(es)"
+
     current = {label["name"] for label in pr.get("labels", [])}
     set_labels(gh, repo, number, current, add=wanted, remove=MANAGED)
 
+    from txa.ci.progress import pipeline_health, step_timings  # imported late: progress depends on this module
+
     timings: dict[str, float] = {}
     if run_id:
-        from txa.ci.progress import step_timings  # imported late: progress depends on this module
-
         try:
             timings = {str(n): round(t, 1) for n, t in step_timings(gh, repo, run_id).items()}
         except GitHubError as exc:
@@ -122,19 +128,41 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         **({"target_url": run_url} if run_url else {}),
     })
 
-    eligible = state == "success" and verdict == "pass" and not outside and not removal_only and not pr.get("draft")
+    eligible = (state in ("success", "pending") and verdict == "pass" and not outside and not removal_only
+                and not pr.get("draft"))
     gate = {
         "pr": number, "head": head_sha, "verdict": verdict, "eligible": eligible, "labels": sorted(wanted),
-        "why": description, "timings": timings,
-        "step15": {"status": "PASS" if state == "success" else "FAIL",
+        "why": description, "timings": timings, "confirm": open_boxes, "health": pipeline_health(gh, repo),
+        "step15": {"status": "PASS" if state in ("success", "pending") else "FAIL",
                    "detail": f"labels: {', '.join(sorted(wanted)) or '-'} · status {STATUS_CONTEXT}={state}"},
         "step16": {"status": "PENDING", "detail": "evaluating merge gate"},
     }
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(gate, indent=2), "utf-8")
     _upsert_comment(gh, repo, number, report, gate, run_url, reason)
+    _finalize_checks(gh, repo, head_sha, report, gate, run_url)
     print(f"STEP 15: PR #{number} verdict={verdict} status={state} labels={sorted(wanted)}")
     return 0
+
+
+def _finalize_checks(gh: GitHub, repo: str, head_sha: str, report: dict | None, gate: dict, run_url: str | None) -> None:
+    """Write each numbered check's exact outcome; never let a check-run hiccup fail the gate."""
+    if report is None:
+        return
+    from txa.ci import checks
+
+    try:
+        checks.finalize(gh, repo, head_sha, report, gate, run_url)
+    except GitHubError as exc:
+        print(f"::warning::could not update the numbered checks ({exc})")
+
+
+_BOX = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\][ \t]+(.+?)[ \t]*$", re.M)
+
+
+def checklist(body: str | None) -> list[str]:
+    """Text of the required checklist boxes that are still unticked ('(if applicable)' ones are optional)."""
+    return [text for mark, text in _BOX.findall(body or "") if mark == " " and "(if applicable)" not in text]
 
 
 _PR_QUERY = """
@@ -202,6 +230,8 @@ def merge_gate(gh: GitHub, merger: GitHub, repo: str, state_path: Path, report_p
             detail = "auto-merge (squash) armed · code-owner approval present - merging"
         else:
             detail = "auto-merge (squash) armed · 🔒 waiting for ≥1 moderator (code owner) approval"
+        if gate.get("confirm"):
+            detail += " · ☑️ and for the contributor to tick the checklist"
         gate["step16"] = {"status": "PASS", "detail": f"{detail} · {lock}"}
     else:
         if armed:
@@ -231,7 +261,9 @@ def _lock_status(gh: GitHub, owner: str, name: str) -> str:
 
 def _finish(gh: GitHub, repo: str, gate: dict, state_path: Path, report_path: Path | None, run_url: str | None) -> int:
     state_path.write_text(json.dumps(gate, indent=2), "utf-8")
-    _upsert_comment(gh, repo, gate["pr"], load_report(report_path), gate, run_url, "")
+    report = load_report(report_path)
+    _upsert_comment(gh, repo, gate["pr"], report, gate, run_url, "")
+    _finalize_checks(gh, repo, gate["head"], report, gate, run_url)
     return 0
 
 
@@ -303,11 +335,30 @@ def lifecycle(gh: GitHub, repo: str, *, pr_number: int | None = None, head_sha: 
     return 0
 
 
+def backfill(gh: GitHub, repo: str) -> int:
+    """Fix PRs that were closed before the lifecycle existed (e.g. merged but still 'awaiting review').
+
+    Equivalent of the search  is:pr state:closed label:txa:awaiting-review  - run it from the
+    ``TXA Lifecycle`` workflow (manual dispatch) or locally with ``txaci gate lifecycle --backfill``.
+    """
+    stale = {_label(k) for k in ("validating", "review", "approved", "fix")}
+    fixed = 0
+    for pr in gh.paginate(f"repos/{repo}/pulls", {"state": "closed"}):
+        labels = {label["name"] for label in pr.get("labels", [])}
+        merged = bool(pr.get("merged_at"))
+        needs_published = merged and _label("published") not in labels
+        if labels & stale or needs_published:
+            _refresh(gh, repo, pr, closed=True, merged=merged)
+            fixed += 1
+    print(f"lifecycle: backfilled {fixed} closed pull request(s)")
+    return 0
+
+
 def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> None:
     number = pr["number"]
     current = {label["name"] for label in pr.get("labels", [])}
-    names = {key: _label(key) for key in ("validating", "verified", "fix", "review", "approved", "published")}
-    in_flight = {names[k] for k in ("validating", "fix", "review", "approved")}
+    names = {key: _label(key) for key in ("validating", "verified", "fix", "review", "approved", "published", "confirm", "infra")}
+    in_flight = {names[k] for k in ("validating", "fix", "review", "approved", "confirm")}
     if closed:
         add = {names["published"]} if merged else set()
         set_labels(gh, repo, number, current, add=add, remove=in_flight)
@@ -316,6 +367,7 @@ def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> Non
         return
     if names["validating"] in current or not current & {names["verified"], names["review"], names["approved"]}:
         return  # still being validated (or never reached the gate): the gate owns the labels
+    current = _sync_confirmation(gh, repo, pr, current, names)
     decision = review_decision(gh, repo, number)
     if decision == "APPROVED":
         add, remove = {names["approved"]}, {names["review"], names["fix"]}
@@ -325,6 +377,37 @@ def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> Non
         add, remove = {names["review"]}, {names["approved"]}
     set_labels(gh, repo, number, current, add=add, remove=remove)
     print(f"lifecycle: PR #{number} decision={decision} -> {sorted(add)}")
+
+
+_CONFIRM_BLOCK = re.compile(r"<!-- txa-bot:confirm -->.*?<!-- /txa-bot:confirm -->", re.S)
+
+
+def _sync_confirmation(gh: GitHub, repo: str, pr: dict, current: set[str], names: dict[str, str]) -> set[str]:
+    """The contributor edited the description: move the label, the txa/verified status and the comment note."""
+    number, sha = pr["number"], pr["head"]["sha"]
+    open_boxes = checklist(pr.get("body"))
+    has_label = names["confirm"] in current
+    if bool(open_boxes) == has_label:
+        return current  # nothing changed
+    ok_text = ("No manifest changes - admin code-owner review required" if names["infra"] in current
+               else "All automated TXA checks passed")
+    if open_boxes:
+        set_labels(gh, repo, number, current, add={names["confirm"]}, remove=set())
+        state, description = "pending", f"Waiting for the contributor to tick {len(open_boxes)} checklist box(es)"
+        current = current | {names["confirm"]}
+    else:
+        set_labels(gh, repo, number, current, add=set(), remove={names["confirm"]})
+        state, description = "success", ok_text
+        current = current - {names["confirm"]}
+    gh.post(f"repos/{repo}/statuses/{sha}", json={"state": state, "context": STATUS_CONTEXT, "description": description})
+    for comment in gh.paginate(f"repos/{repo}/issues/{number}/comments"):
+        if comment["body"].startswith(REPORT_MARKER) and comment["user"]["type"] == "Bot":
+            if _CONFIRM_BLOCK.search(comment["body"]):
+                gh.patch(f"repos/{repo}/issues/comments/{comment['id']}",
+                         json={"body": _CONFIRM_BLOCK.sub(lambda _: confirm_note(open_boxes), comment["body"])})
+            break
+    print(f"lifecycle: PR #{number} checklist {'incomplete' if open_boxes else 'confirmed'} -> status {state}")
+    return current
 
 
 def _footer(gh: GitHub, repo: str, pr: dict, merged: bool) -> None:

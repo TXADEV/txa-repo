@@ -1,16 +1,24 @@
-<!-- Prefer `txacreate new <installer-url>`: it fills this in for you. -->
+<!-- Prefer `txacreate new <installer-url>`: it opens this pull request and fills everything in for you. -->
 
-### Release
+## 📖 Description
 
-- **Package:** `TXAVL.<AppName>`
-- **Version:** `X.Y.Z`
+<!-- Package id, version and what changed. -->
 
-### Checklist
+## ✅ Checklist
 
-- [ ] One release per pull request (one `manifests/<shard>/<Namespace>/<AppName>/<X.Y.Z>/` folder)
-- [ ] Only `core.txa.yaml`, `build.txa.yaml` and `about.<lang>.txa.yaml` in that folder
-- [ ] `txaci validate <folder>` passes locally
-- [ ] The installer URL is the vendor's official HTTPS download
+- [ ] I read the [contribution guide](https://github.com/TXAVL/txa-repo#readme)
+- [ ] Linked to an issue (if applicable)
+  - Resolves #[Issue Number]
 
-The TXA Bot runs the 16-step pipeline and labels this PR. A moderator (code owner)
-must approve before the bot's squash auto-merge can complete.
+## 📦 Manifest Checklist
+
+- [ ] Checked that there aren't other open [pull requests](https://github.com/TXAVL/txa-repo/pulls) for the same manifest update/change
+- [ ] This PR only modifies one (1) manifest
+- [ ] Validated manifest locally with `txacreate validate <path>`
+- [ ] Tested manifest locally with `txapm install --manifest <path>`
+- [ ] Manifest conforms to the [v1 schema](https://github.com/TXAVL/txa-repo/tree/main/tools/src/txa/schemas)
+
+> **Note:** `<path>` is the directory containing the manifest you're submitting.
+
+> The bot keeps this pull request blocked until every box above is ticked.
+> A TXA moderator then reviews it; nothing is published before they approve.

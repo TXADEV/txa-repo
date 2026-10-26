@@ -22,7 +22,7 @@ from txa import __version__
 from txa.core import config, console, net, semver, winos
 from txa.pm import installer, uninstall
 from txa.pm.installer import InstallError
-from txa.pm.source import NotFound, Source, SourceError, Sources, check_url
+from txa.pm.source import LocalRelease, NotFound, Source, SourceError, Sources, check_url
 
 
 P = console.paint  # colour a string
@@ -41,6 +41,45 @@ def _about(cards: dict) -> dict:
 def _pick(args, query: str) -> tuple[Source, str]:
     """(source, package id) honouring --source; refuses ids that exist in several sources."""
     return Sources(getattr(args, "source", None)).resolve(query)
+
+
+_WAITING = {
+    "awaiting-review": "waiting for a Contributor/moderator to review and approve it",
+    "approved": "approved and about to be merged - it appears in the library in a few minutes",
+    "validating": "the automatic checks are still running",
+    "needs-confirmation": "the author has not yet ticked the pull request checklist",
+    "fix-required": "the automatic checks failed and the author has to fix the pull request",
+}
+
+
+def _waiting_text(entry: dict) -> str:
+    return _WAITING.get(entry.get("status"), "waiting for review")
+
+
+def _refuse_pending(source: Source, entry: dict) -> int:
+    safe = console.safe
+    console.error("txapm", f"{safe(entry['id'])} {safe(entry['version'])} cannot be installed yet - {_waiting_text(entry)}.")
+    console.say(f"  {console.label('pull request')}{P(safe(entry['url']), 'cyan')}  (#{safe(entry['pr'])}, by {safe(entry.get('by', '?'))})")
+    console.say("  A package is installable only after a Contributor approves its pull request and it is merged into the library.")
+    return 1
+
+
+def _pending_for_install(args, query: str, version: str | None) -> tuple[Source, dict] | None:
+    """The waiting entry to refuse instead of failing with 'not found' (or None when the request can go ahead)."""
+    try:
+        sources = Sources(getattr(args, "source", None))
+        found = sources.find_pending(query, version)
+        if not found:
+            return None
+        source, entry = found
+        published = source.find(query)
+        if published and not version:
+            return None  # the published version installs normally; only an explicit pending version is refused
+        if published and entry["version"] in source.versions(published):
+            return None
+        return found
+    except (SourceError, NotFound, net.NetError):
+        return None
 
 
 def _source_of(record: dict | None) -> Source:
@@ -161,6 +200,27 @@ def _available(records: dict) -> dict[str, str]:
 
 
 def cmd_install(args) -> int:
+    if args.manifest:
+        # Test a manifest folder before submitting it: same checks, same download + SHA-256 + install path.
+        from txa.ci.context import init_local
+        from txa.ci.report import quick_check
+
+        folder = Path(args.manifest)
+        local = LocalRelease(folder)
+        console.say(f"→ installing {P(local.package_id, 'bold')} {local.bundle.version} from the local manifest {P(str(folder), 'cyan')}")
+        report = quick_check(init_local([folder], offline=True), quiet=True)
+        if report["verdict"] == "fail":
+            for row in report["results"]:
+                for message in row["messages"]:
+                    if message["level"] == "fail":
+                        console.say(f"✗ STEP {row['step']:02d}: {message['text']}")
+            return _die("the manifest has problems - fix them first (txacreate validate <folder>)")
+        return _install(local, local.package_id, local.bundle.version, args)
+    if not args.package:
+        return _die("which package? use `txapm install <id>` or `txapm install --manifest <folder>`")
+    waiting = _pending_for_install(args, args.package, args.version)
+    if waiting:
+        return _refuse_pending(*waiting)
     src, package_id = _pick(args, args.package)
     return _install(src, package_id, args.version, args)
 
@@ -455,9 +515,28 @@ def cmd_validate(args) -> int:
     return txaci_main(["validate", *args.paths, *(["--offline"] if args.offline else [])])
 
 
+def _show_waiting(source: Source, entry: dict) -> None:
+    safe = console.safe
+    print(f"{P(safe(entry['name']), 'bold', 'cyan')} {P(safe(entry['version']), 'yellow', 'bold')}  {P('(' + safe(entry['id']) + ')', 'gray')}"
+          f"  {P('[source: ' + source.name + ']', 'magenta')}  {P('WAITING FOR REVIEW', 'yellow', 'bold')}")
+    if entry.get("summary"):
+        print(f"  {safe(entry['summary'])}")
+    print(f"  {console.label('publisher')}{safe(entry.get('publisher') or '?')}   {P('submitted by', 'gray')} {safe(entry.get('by', '?'))}")
+    print(f"  {console.label('status')}{_waiting_text(entry)}")
+    print(f"  {console.label('pull request')}{P(safe(entry['url']), 'cyan')}")
+    console.say("! it cannot be installed until a Contributor approves the pull request")
+
+
 def cmd_show(args) -> int:
-    src, package_id = _pick(args, args.package)
-    version, cards = src.release(package_id, args.version)
+    try:
+        src, package_id = _pick(args, args.package)
+        version, cards = src.release(package_id, args.version)
+    except NotFound:
+        waiting = Sources(getattr(args, "source", None)).find_pending(args.package, args.version)
+        if not waiting:
+            raise
+        _show_waiting(*waiting)
+        return 0
     build, about = cards["build"], _about(cards)
     if args.versions:
         print("\n".join(P(v, "green") for v in src.versions(package_id)))
@@ -477,19 +556,34 @@ def cmd_show(args) -> int:
         engine_tag = P(target["engine"].ljust(5), "magenta")
         print(f"  {arch_tag} {engine_tag} {P(target['source']['url'], 'cyan')}")
         print(f"        {P('sha256', 'gray')} {target['source']['sha256']}")
+    newer = src.find_pending(package_id)
+    if newer and newer["version"] != version and (not semver.is_valid(newer["version"]) or semver.parse(newer["version"]) > semver.parse(version)):
+        console.say(f"! version {console.safe(newer['version'])} is waiting for review ({console.safe(newer['url'])}) - not installable yet")
     return 0
 
 
 def cmd_search(args) -> int:
-    hits = Sources(args.source).search(args.text)
-    if not hits:
+    sources = Sources(args.source)
+    hits = sources.search(args.text)
+    waiting = sources.pending_matching(args.text)
+    if not hits and not waiting:
         console.say(f"! no packages found for '{args.text}' - the repository may be empty or the name differs")
         return 1
-    width = max(len(h["id"]) for _, h in hits)
-    print(console.head(f"{'Id':<{width}}  {'Version':<10} {'Source':<10} Summary"))
-    for source, hit in hits:
-        print(f"{C(hit['id'], width, 'bold')}  {C(hit['latest'], 10, 'green')} {C(source.name, 10, 'magenta')} {hit['summary']}")
-    console.say(f"{P(str(len(hits)), 'bold')} package(s) - install with {P('txapm install <Id>', 'bold')}")
+    safe = console.safe
+    if hits:
+        width = max(len(h["id"]) for _, h in hits)
+        print(console.head(f"{'Id':<{width}}  {'Version':<10} {'Source':<10} Summary"))
+        for source, hit in hits:
+            print(f"{C(safe(hit['id']), width, 'bold')}  {C(safe(hit['latest']), 10, 'green')} {C(source.name, 10, 'magenta')} {safe(hit['summary'])}")
+        console.say(f"{P(str(len(hits)), 'bold')} package(s) - install with {P('txapm install <Id>', 'bold')}")
+    if waiting:
+        width = max(len(e["id"]) for _, e in waiting)
+        print()
+        print(console.head(f"Waiting for review - cannot be installed yet"))
+        for source, entry in waiting:
+            print(f"{C(safe(entry['id']), width, 'bold')}  {C(safe(entry['version']), 10, 'yellow')} "
+                  f"{C('PR #' + str(entry['pr']), 8, 'magenta')} {P(_waiting_text(entry), 'gray')}")
+        console.say(f"{P(str(len(waiting)), 'bold')} package(s) need a Contributor to approve them first - see them with {P('txapm show <Id>', 'bold')}")
     return 0
 
 
@@ -550,7 +644,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("install", aliases=["add"], help="download, verify and silently install a package")
     p.add_argument("-s", "--source", help="only look in this source (see `txapm source list`)")
-    p.add_argument("package", help="package id (TXAVL.HelloTool) or alias")
+    p.add_argument("package", nargs="?", help="package id (TXAVL.HelloTool) or alias")
+    p.add_argument("--manifest", metavar="FOLDER", help="install from a local manifest folder (to test it before submitting)")
     p.add_argument("--version", dest="version", help="install this X.Y.Z instead of the newest")
     p.add_argument("--download-only", action="store_true", help="stop after downloading and verifying")
     _install_options(p)

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from txa import __version__
 from txa.ci.context import Context
 from txa.ci.steps import TITLES
-from txa.constants import REPORT_MARKER
+from txa.constants import LABELS, REPORT_MARKER
 from txa.core import console
 
 ICONS = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌", "SKIP": "⏭️", "PENDING": "⏳"}
@@ -96,6 +97,33 @@ def _installer_rows(report: dict, target: dict) -> list[str]:
     return rows
 
 
+def badges(health: dict[str, bool] | None) -> str:
+    """Pipeline health badges, shown at the top of the bot's comment."""
+    if not health:
+        return ""
+    out = []
+    for label, ok in health.items():
+        value, color = ("Healthy", "brightgreen") if ok else ("Degraded", "orange")
+        out.append(f"![{label}](https://img.shields.io/badge/{quote(label)}-{value}-{color}?labelColor=555555)")
+    return " ".join(out)
+
+
+def confirm_note(open_boxes: list[str]) -> str:
+    """The block asking the contributor to tick the checklist (the bot rewrites it when they do)."""
+    if open_boxes:
+        listing = "\n".join(f"> - [ ] {text}" for text in open_boxes[:10])
+        inner = (f"> ☑️ **Please tick every box of the checklist in the pull request description.** "
+                 f"Nothing can be merged until you do ({len(open_boxes)} still open):\n>\n{listing}")
+    else:
+        inner = "> ✅ The contributor confirmed the checklist."
+    return f"<!-- txa-bot:confirm -->\n{inner}\n<!-- /txa-bot:confirm -->"
+
+
+WAIT_FOR_MODERATOR = ("> ℹ️ **The check-in policy requires a moderator (code owner) to approve pull requests from the "
+                      "community.** TXA moderators are volunteers - please be patient and allow them enough time to "
+                      "review your submission. Nothing is published before they approve.")
+
+
 def render_markdown(report: dict, gate: dict | None = None, run_url: str | None = None) -> str:
     timings = (gate or {}).get("timings")
     verdict = report.get("verdict")
@@ -105,7 +133,10 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
         "infra": "🛠️ Infrastructure change",
         "empty": "ℹ️ Nothing to validate",
     }.get(verdict, str(verdict))
-    lines = [REPORT_MARKER, "## 🤖 TXA Bot · Validation Report", "", f"**{headline}**", ""]
+    lines = [REPORT_MARKER]
+    if (gate or {}).get("health"):
+        lines += [badges(gate["health"]), ""]
+    lines += ["## 🤖 TXA Bot · Validation Report", "", f"**{headline}**", ""]
     if verdict == "infra":
         lines += ["This pull request changes no manifests. It touches:", ""]
         lines += [f"- `{p}`" for p in report.get("outside", [])[:30]]
@@ -149,6 +180,13 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
         lines += ["> ❌ Manifest changes are mixed with files outside `manifests/` - split them into separate PRs.", ""]
     if verdict == "fail":
         lines += ["Fix the failing checks, push a new commit and the bot starts over automatically.", ""]
+    labels = set((gate or {}).get("labels", []))
+    if gate and gate.get("confirm"):
+        lines += [confirm_note(gate["confirm"]), ""]
+    if verdict in ("pass", "infra") and LABELS["approved"][0] in labels:
+        lines += ["> ✅ **A code owner approved this pull request** - it merges as soon as every check is green.", ""]
+    elif verdict in ("pass", "infra") and LABELS["review"][0] in labels:
+        lines += [WAIT_FOR_MODERATOR, ""]
     if gate and gate.get("labels"):
         lines.append("Labels: " + " ".join(f"`{label}`" for label in gate["labels"]))
     if run_url:
@@ -159,7 +197,7 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
 QUICK_STEPS = (1, 2, 3, 4, 5, 14)  # everything that only needs the YAML cards, no network
 
 
-def quick_check(ctx: Context) -> dict:
+def quick_check(ctx: Context, quiet: bool = False) -> dict:
     """Fast offline sanity check of the cards. Silent apart from one line (or the problems found).
 
     The repository bot runs the full 14 steps on the pull request, so this only catches the
@@ -172,10 +210,11 @@ def quick_check(ctx: Context) -> dict:
     report = build_report(ctx)
     problems = [(r["step"], m["text"]) for r in report["results"] if r["status"] == "FAIL"
                 for m in r["messages"] if m["level"] == "fail"]
-    for number, text in problems:
-        console.say(f"✗ STEP {number:02d} {TITLES[number]}: {text}")
-    if not problems:
-        console.say("✓ cards look valid (encoding, YAML, naming, version, license, switches)")
+    if not quiet:
+        for number, text in problems:
+            console.say(f"✗ STEP {number:02d} {TITLES[number]}: {text}")
+        if not problems:
+            console.say("✓ cards look valid (encoding, YAML, naming, version, license, switches)")
     return report
 
 

@@ -11,18 +11,25 @@ on:
   push:
     branches: [main]
     paths: ["manifests/**", "policy.txa.yaml"]
+  # the "waiting for review" list follows the pull requests: refresh it when the bot finishes or a PR changes
+  workflow_run:
+    workflows: ["TXA Gate", "TXA Lifecycle"]
+    types: [completed]
+  pull_request_target:
+    types: [opened, reopened, closed, ready_for_review, converted_to_draft]
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
   pages: write
   id-token: write
 
 concurrency:
   group: txa-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -39,7 +46,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check ./tools
 
       - name: Generate static API
-        run: txaci build-api --root . --out site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: txaci build-api --root . --out site --pending
 
       - uses: actions/configure-pages@v6
 

@@ -24,7 +24,8 @@ from txa.ci.report import build_report, quick_check, render_console, run_live
 from txa.core import config, console, credentials, engines, licenses, net, semver, winos
 from txa.core.github import GitHub, GitHubError, device_flow
 from txa.core.manifest import ManifestError, split_id
-from txa.create.draft import Draft, TargetDraft, guess_arch, known_arch, name_from_filename, pascal
+from txa.create import ghmeta, wizard
+from txa.create.draft import Draft, Item, guess_arch, known_arch, name_from_filename, pascal
 
 MAX_DOWNLOAD = 4 * 1024 * 1024 * 1024
 
@@ -185,17 +186,6 @@ def _describe_installer(dl, found, engine: str, arch: str) -> None:
     print(f"    {console.label('CPU', 11)}{paint(arch, 'yellow', 'bold')}{wrapper}")
 
 
-def _ask_arch(file_name: str, engine: str) -> str:
-    """A 32-bit installer program says nothing about the software it installs - ask instead of guessing."""
-    print(f"\n  {console.paint(file_name, 'bold')} is a 32-bit installer program. Many 64-bit apps ship like this, "
-          f"so TXA cannot tell which CPU the software is built for.")
-    print(f"    {console.paint('x86', 'yellow', 'bold')}    32-bit software (runs on every PC)")
-    print(f"    {console.paint('x64', 'yellow', 'bold')}    64-bit Intel/AMD software")
-    print(f"    {console.paint('arm64', 'yellow', 'bold')}  Windows on ARM software")
-    return _ask_until("CPU the software is built for", "x64",
-                      lambda v: None if v in ("x86", "x64", "arm64") else "type x86, x64 or arm64")
-
-
 def _open_pull_request(url: str, args) -> None:
     """Open the new pull request in the default browser (skip with --no-browser)."""
     if getattr(args, "no_browser", False):
@@ -206,27 +196,6 @@ def _open_pull_request(url: str, args) -> None:
         opened = False
     console.say(f"→ {'opening the pull request in your browser' if opened else 'open this link in your browser'}"
                 f"{'' if opened else ': ' + console.paint(url, 'cyan', 'bold')}")
-
-
-def _license_menu() -> str:
-    """Numbered list of the usual licenses; a name typed instead of a number is understood too."""
-    paint = console.paint
-    print(f"\n  {paint('Choose a license', 'bold')}")
-    for index, (name, note) in enumerate(licenses.COMMON, 1):
-        print(f"    {paint(str(index).rjust(2) + ')', 'cyan')} {console.cell(name, 18, 'bold')} {paint(note, 'gray')}")
-    other = len(licenses.COMMON) + 1
-    print(f"    {paint(str(other).rjust(2) + ')', 'cyan')} {console.cell('Other', 18, 'bold')} {paint('type any SPDX identifier', 'gray')}")
-    while True:
-        answer = console.ask(f"Number 1-{other}, or type a license name").strip()
-        if answer.isdigit() and 1 <= int(answer) <= len(licenses.COMMON):
-            return licenses.COMMON[int(answer) - 1][0]
-        if answer.isdigit() and int(answer) == other:
-            answer = console.ask("SPDX identifier (e.g. Zlib, EPL-2.0)").strip()
-        name = licenses.normalize(answer)
-        if name:
-            return name
-        hint = licenses.suggest(answer)
-        console.say(f"    ✗ '{answer}' is not a known license" + (f" - did you mean {', '.join(hint)}?" if hint else ""))
 
 
 def _resolve_license(draft: Draft, interactive: bool) -> str | None:
@@ -241,7 +210,9 @@ def _resolve_license(draft: Draft, interactive: bool) -> str | None:
     if not name:
         if not interactive:
             return "missing --license (e.g. --license MIT)"
-        name = _license_menu()
+        draft.license_name = ""
+        wizard.ask_license(draft)  # the same list-with-explanations the guided flow uses
+        return None
     draft.license_name = name
     if licenses.needs_url(name) and not draft.license_url:
         if not interactive:
@@ -260,101 +231,103 @@ def _per_url(value: str | None, count: int) -> list[str | None]:
     return items
 
 
-def cmd_new(args) -> int:
-    upstream = config.get("upstream")
-    namespace = config.get("namespace")
-    interactive = sys.stdin.isatty() and not args.yes
-    total = 4 if args.dry_run else 5
-    if not args.dry_run:
-        console.say(f"→ target repository {upstream}")
+def _allowed_namespaces(upstream: str) -> list[str]:
+    """Namespaces the repository accepts (policy.txa.yaml on its main branch); best effort."""
+    try:
+        import yaml
 
-    # 1. download + analyse every installer
-    console.stage(1, total, f"Downloading and analysing {len(args.urls)} file(s)")
+        text = net.session().get(f"https://raw.githubusercontent.com/{upstream}/main/policy.txa.yaml", timeout=6).text
+        found = (yaml.safe_load(text) or {}).get("namespaces") or []
+        return [str(n) for n in found] or [config.get("namespace")]
+    except Exception:  # offline or no policy file: fall back to the default namespace
+        return [config.get("namespace")]
+
+
+def _download_all(args, guided: bool) -> list[Item] | None:
+    """Download every URL into a temp folder and look inside; prints the report for each file."""
     work = Path(tempfile.mkdtemp(prefix="create-", dir=config.temp_root()))
     session = net.session()
     arches, engine_overrides = _per_url(args.arch, len(args.urls)), _per_url(args.engine, len(args.urls))
-    analysed = []
+    items: list[Item] = []
     for index, url in enumerate(args.urls):
         print(f"      {console.paint(url, 'cyan')}")
         try:
-            dl = net.download(session, url, work / f"payload{index}", MAX_DOWNLOAD,
-                              on_progress=console.progress("      "))
+            dl = net.download(session, url, work / f"payload{index}", MAX_DOWNLOAD, on_progress=console.progress("      "))
         except net.NetError as exc:
             console.done_line()
-            return _die(str(exc))
+            _die(str(exc))
+            return None
         console.done_line()
         found = engines.inspect(dl.path)
         engine = engine_overrides[index] or found.engine
         if not engine:
-            return _die(f"{dl.path.name}: unsupported payload ({found.label}); pass --engine")
-        arch = arches[index] or known_arch(dl.path.name, found)
-        if arch is None:
-            if found.machine == "x86" and interactive:
-                arch = _ask_arch(dl.path.name, engine)
-            else:
-                arch = guess_arch(dl.path.name, found)
+            _die(f"{dl.path.name}: unsupported payload ({found.label}); pass --engine")
+            return None
+        known = arches[index] or known_arch(dl.path.name, found)
+        arch = known or guess_arch(dl.path.name, found)
         _describe_installer(dl, found, engine, arch)
-        analysed.append((url, dl, found, arch, engine))
-    seen = [a[3] for a in analysed]
-    if len(set(seen)) != len(seen):
-        return _die(f"two installers resolve to the same architecture ({', '.join(seen)}) - use --arch x64,x86,…")
-    _, first_dl, first, _, _ = analysed[0]
+        item = Item(url, dl, found, engine, arch, arch_known=bool(known),
+                    mirrors=list(args.mirror or []) if len(args.urls) == 1 else [])
+        if engine == "portable":
+            item.portable = dict(found.portable) if found.format == "zip" else {}
+            if args.path:
+                item.portable["path"] = [p.strip() for p in args.path.split(",") if p.strip()]
+            if args.strip is not None:
+                item.portable["strip"] = args.strip
+        else:
+            item.switches = dict(engines.DEFAULT_SWITCHES.get(engine, {}))
+        items.append(item)
+    arch_list = [i.arch for i in items]
+    if len(set(arch_list)) != len(arch_list) and not guided:
+        _die(f"two installers resolve to the same architecture ({', '.join(arch_list)}) - use --arch x64,x86,…")
+        return None
+    return items
 
-    # 2. identity + carry-over from the newest published release
-    console.stage(2, total, "Resolving the package identity and metadata")
-    raw_name = args.name or first.product_name or name_from_filename(first_dl.path.name)
-    package_id = args.id or f"{namespace}.{pascal(raw_name)}"
-    try:
-        split_id(package_id)
-    except ManifestError as exc:
-        return _die(str(exc))
-    previous: dict = {}
-    published: list[str] = []
-    try:
-        from txa.pm.source import Source
 
-        src = Source()
-        latest, previous = src.release(package_id)
-        published = src.versions(package_id)
-        console.say(f"→ {package_id} already published (latest {latest}) - reusing its metadata")
-    except Exception:
-        if getattr(args, "update", False):
-            return _die(f"{package_id} is not published yet - use `txacreate new`")
-        console.say(f"→ {package_id} is a new package")
+def _initial_draft(args, items: list[Item], previous: dict, github: dict | None, namespace: str) -> Draft:
+    """Suggested answers: flags, then the published version, then the file, then the GitHub project."""
+    first = items[0]
+    github = github or {}
     prev_core = previous.get("core") or {}
     prev_build = previous.get("build") or {}
     prev_lang = (prev_core.get("locale") or {}).get("default")
     prev_about = (previous.get("about") or {}).get(prev_lang or "", {})
     prev_license = prev_about.get("license") or {}
-
-    version = args.version or semver.coerce(first.product_version) or semver.coerce(first_dl.path.name) \
-        or semver.coerce(args.urls[0])
     prev_package = prev_core.get("package") or {}
+    info = first.found
+    description = (info.pe.version_info.get("FileDescription") if info.pe else None) or ""
     typed_names = [n.strip() for n in args.alias.split(",") if n.strip()] if args.alias else []
-    all_portable = all(a[4] == "portable" for a in analysed)
+    name = args.name or prev_about.get("name") or info.product_name or github.get("name") \
+        or name_from_filename(first.dl.path.name)
+    version = args.version or semver.coerce(info.product_version) or github.get("version") \
+        or semver.coerce(first.dl.path.name) or semver.coerce(first.url) or ""
     draft = Draft(
-        package_id=package_id,
-        version=version or "",
+        package_id=args.id or f"{namespace}.{pascal(name)}",
+        version=version,
         lang=args.lang or prev_lang or "en-US",
         channel=args.channel or prev_package.get("channel", "stable"),
         alias=typed_names[0] if typed_names else prev_package.get("alias"),
         aliases=typed_names[1:] if typed_names else prev_package.get("aliases", []),
-        tags=[t.strip() for t in args.tags.split(",")] if args.tags else prev_core.get("tags", []),
+        tags=[t.strip() for t in args.tags.split(",")] if args.tags else prev_core.get("tags") or github.get("tags", []),
         min_build=args.min_build or (prev_build.get("platform") or {}).get("min_build") or "10.0.17763",
-        scope=args.scope or prev_build.get("scope") or ("user" if all_portable else "machine"),
-        name=args.name or prev_about.get("name") or (first.product_name or raw_name),
-        publisher=args.publisher or prev_about.get("publisher") or (first.company or ""),
+        scope=args.scope or prev_build.get("scope") or ("user" if all(i.engine == "portable" for i in items) else "machine"),
+        name=name,
+        publisher=args.publisher or prev_about.get("publisher") or info.company or github.get("publisher") or "",
         author=args.author or prev_about.get("author") or "",
-        summary=args.summary or prev_about.get("summary") or "",
+        summary=args.summary or prev_about.get("summary") or github.get("summary")
+        or (description if len(description) >= 10 else ""),
         description=args.description or prev_about.get("description"),
-        homepage=args.homepage or prev_about.get("homepage"),
-        license_name=args.license or prev_license.get("name") or "",
-        license_url=args.license_url or prev_license.get("url"),
+        homepage=args.homepage or prev_about.get("homepage") or github.get("homepage"),
+        license_name=args.license or prev_license.get("name") or github.get("license") or "",
+        license_url=args.license_url or prev_license.get("url") or github.get("license_url"),
         extra_abouts={k: v for k, v in (previous.get("about") or {}).items() if k != prev_lang},
     )
     draft.author = draft.author or draft.publisher
+    return draft
 
-    # 3. fill gaps
+
+def _fill_from_flags(args, draft: Draft, items: list[Item], interactive: bool) -> str | None:
+    """Script mode: every answer must come from flags (or the published version); returns an error text."""
     required = {
         "version": ("Version (X.Y.Z)", lambda v: None if semver.is_valid(v) else "use strict X.Y.Z"),
         "name": ("Display name", None),
@@ -366,101 +339,215 @@ def cmd_new(args) -> int:
     if draft.version and not semver.is_valid(draft.version):
         missing.insert(0, "version")
     if missing and not interactive:
-        return _die("missing " + ", ".join(f"--{k.replace('_name', '').replace('_', '-')}" for k in missing))
+        return "missing " + ", ".join(f"--{k.replace('_name', '').replace('_', '-')}" for k in missing)
     for key in missing:
         prompt, check = required[key]
         setattr(draft, key, _ask_until(prompt, getattr(draft, key) or None, check))
     problem = _resolve_license(draft, interactive)
     if problem:
-        return _die(problem)
-    if published and draft.version in published:
-        return _die(f"{package_id} {draft.version} is already published - bump the version")
-
-    for url, dl, found, arch, engine in analysed:
-        if engine == "portable":
-            spec = dict(found.portable) if found.format == "zip" else {}
-            if args.path:
-                spec["path"] = [p.strip() for p in args.path.split(",") if p.strip()]
-            if args.strip is not None:
-                spec["strip"] = args.strip
-            if not spec.get("path"):
-                return _die(f"{dl.path.name}: no program folder found - pass --path <folder[,folder]> (and --strip N)")
-            draft.targets.append(TargetDraft(url, arch, engine, dl.sha256, dl.bytes, dl.path, {},
-                                             list(args.mirror or []) if len(analysed) == 1 else [], spec))
+        return problem
+    for item in items:
+        if item.engine == "portable":
+            if not item.portable.get("path"):
+                return f"{item.dl.path.name}: no program folder found - pass --path <folder[,folder]> (and --strip N)"
             continue
-        switches = dict(engines.DEFAULT_SWITCHES.get(engine, {}))
         if args.silent:
-            switches["silent"] = args.silent
+            item.switches["silent"] = args.silent
         if args.progress:
-            switches["progress"] = args.progress
+            item.switches["progress"] = args.progress
         if args.custom:
-            switches["custom"] = args.custom
-        if engine == "exe" and not switches.get("silent"):
+            item.switches["custom"] = args.custom
+        if item.engine == "exe" and not item.switches.get("silent"):
             if not interactive:
-                return _die("engine 'exe' needs --silent (and ideally --progress)")
-            switches["silent"] = _ask_until("Silent switches for this .exe", None)
-            switches["progress"] = console.ask("Switches for install with progress UI", switches["silent"])
-        draft.targets.append(TargetDraft(url, arch, engine, dl.sha256, dl.bytes, dl.path, switches,
-                                         list(args.mirror or []) if len(analysed) == 1 else []))
+                return "engine 'exe' needs --silent (and ideally --progress)"
+            item.switches["silent"] = _ask_until("Silent switches for this .exe", None)
+            item.switches["progress"] = console.ask("Switches for install with progress UI", item.switches["silent"])
+    return None
 
-    # 4. write the cards
-    console.stage(3, total, "Writing the TXA cards")
-    out_root = Path(args.out) if args.out else (Path.cwd() / "txa-out" if args.dry_run else work / "tree")
-    release = out_root / draft.directory
+
+def _materialise(draft: Draft, items: list[Item], root: Path) -> dict[str, str]:
+    """Write the three cards under ``root/<release directory>`` and return {file name: text}."""
+    draft.targets = [item.target() for item in items]
+    release = root / draft.directory
     release.mkdir(parents=True, exist_ok=True)
     rendered = draft.render()
     for filename, text in rendered.items():
         (release / filename).write_text(text, "utf-8", newline="\n")
-    console.say(f"→ wrote {len(rendered)} card(s) to {release}")
+    return rendered
 
-    # 5. local pre-flight with the very same 14 checks the bot runs
+
+def _preview(draft: Draft, rendered: dict[str, str], root: Path, published: list[str]) -> dict:
+    """Print the three cards, then 'Manifest validation succeeded: True/False' like the reference flow."""
+    paint = console.paint
+    print("\nGenerating a preview of your manifests...")
+    for title, filename in (("Core card", "core.txa.yaml"), ("Build card", "build.txa.yaml"),
+                            ("About card", f"about.{draft.lang}.txa.yaml")):
+        print(f"\n{paint(title + ' preview:', 'bold', 'cyan')}")
+        print(rendered.get(filename, ""))
+    ctx = init_local([root / draft.directory], offline=True)
+    if published:
+        ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
+    report = quick_check(ctx, quiet=True)
+    ok = report["verdict"] != "fail"
+    print(f"Manifest validation succeeded: {paint(str(ok), 'green' if ok else 'red', 'bold')}")
+    if not ok:
+        for row in report["results"]:
+            for message in row["messages"]:
+                if message["level"] == "fail":
+                    console.say(f"✗ STEP {row['step']:02d}: {message['text']}")
+    return report
+
+
+def _show_path(path: Path) -> str:
+    home = str(Path.home())
+    text = str(path)
+    return "%USERPROFILE%" + text[len(home):] if text.lower().startswith(home.lower()) else text
+
+
+def cmd_new(args) -> int:
+    upstream = config.get("upstream")
+    namespace = config.get("namespace")
+    interactive = sys.stdin.isatty() and not args.yes
+    guided = interactive and sys.stdout.isatty()
+    total = (3 if args.dry_run else 4) if guided else (4 if args.dry_run else 5)
+    if not args.dry_run:
+        console.say(f"→ target repository {upstream}")
+
+    # 1. download + analyse every installer
+    console.stage(1, total, f"Downloading and analysing {len(args.urls)} file(s)")
+    items = _download_all(args, guided)
+    if items is None:
+        return 1
+
+    # 2. identity, suggested answers, questions
+    console.stage(2, total, "Package details" if guided else "Resolving the package identity and metadata")
+    github = ghmeta.from_release_url(items[0].url, _github_client()) if guided else None
+    draft = _initial_draft(args, items, {}, github, namespace)
+    previous: dict = {}
+    published: list[str] = []
+
+    def lookup(package_id: str) -> None:
+        nonlocal previous, published
+        try:
+            from txa.pm.source import Source
+
+            src = Source()
+            latest, found_cards = src.release(package_id)
+            published, previous = src.versions(package_id), found_cards
+            console.say(f"→ {package_id} already published (latest {latest}) - reusing its metadata")
+        except Exception:
+            previous, published = {}, []
+            if getattr(args, "update", False):
+                raise LookupError(f"{package_id} is not published yet - use `txacreate new`") from None
+            console.say(f"→ {package_id} is a new package")
+
+    try:
+        split_id(draft.package_id)
+        lookup(draft.package_id)
+    except (ManifestError, LookupError) as exc:
+        if not guided or getattr(args, "update", False):
+            return _die(str(exc))
+    if previous:
+        draft = _initial_draft(args, items, previous, github, namespace)
+
+    namespaces = _allowed_namespaces(upstream) if guided else []
+    if guided:
+        suggested_id = draft.package_id
+        wizard.collect(draft, items, lock_id=bool(getattr(args, "update", False)), namespaces=namespaces, github=github)
+        if draft.package_id != suggested_id:
+            lookup(draft.package_id)
+    else:
+        problem = _fill_from_flags(args, draft, items, interactive)
+        if problem:
+            return _die(problem)
+    if published and draft.version in published:
+        return _die(f"{draft.package_id} {draft.version} is already published - bump the version")
+
+    # 3. cards: write, preview, let the user change their mind, save
+    console.stage(3, total, "Preview and save the TXA cards" if guided else "Writing the TXA cards")
+    work_root = Path(tempfile.mkdtemp(prefix="tree-", dir=config.temp_root()))
     report = None
-    if not args.no_validate:
-        rel = release.relative_to(out_root).as_posix()
-        ctx = init_local([release], offline=args.offline,
-                         payloads={rel: {t.arch: t.payload for t in draft.targets}})
-        if published:
-            ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
+    if guided:
+        while True:
+            rendered = _materialise(draft, items, work_root)
+            check = _preview(draft, rendered, work_root, published)
+            broken = check["verdict"] == "fail"
+            if not console.confirm("Would you like to make changes to this manifest?", default=broken):
+                break
+            wizard.collect(draft, items, lock_id=bool(getattr(args, "update", False)), namespaces=namespaces,
+                           github=github, first_time=False)
+        if broken and not args.force:
+            return _die("the cards have problems - fix them, or pass --force to open the PR anyway")
+        save_root = Path(args.out) if args.out else Path.home() / "manifests"
+        saved = save_root / draft.directory
+        saved.mkdir(parents=True, exist_ok=True)
+        for filename, text in rendered.items():
+            (saved / filename).write_text(text, "utf-8", newline="\n")
+        console.say(f"→ Manifest saved to {console.paint(_show_path(saved), 'cyan', 'bold')}")
         if args.check:
-            console.stage(4, total, "Running the 14 bot checks locally (--check)")
-            report = run_live(ctx)
-        else:
-            ctx.data["offline"] = True
-            console.stage(4, total, "Quick check of the cards (the repository bot runs the full 14 steps on your pull request)")
-            checked = quick_check(ctx)
-            report = checked if checked["verdict"] == "fail" else None
-        if report and report["verdict"] == "fail" and not args.force:
-            return _die("the cards have problems - fix the issues above, or pass --force to open the PR anyway")
-        if not args.check:
-            report = None  # the PR body should not claim a full pre-flight that did not run
+            report = run_live(init_local([saved], offline=args.offline, payloads={
+                saved.relative_to(save_root).as_posix(): {i.arch: i.dl.path for i in items}}))
+    else:
+        out_root = Path(args.out) if args.out else (Path.cwd() / "txa-out" if args.dry_run else work_root)
+        rendered = _materialise(draft, items, out_root)
+        release = out_root / draft.directory
+        console.say(f"→ wrote {len(rendered)} card(s) to {release}")
+        if not args.no_validate:
+            rel = release.relative_to(out_root).as_posix()
+            ctx = init_local([release], offline=args.offline, payloads={rel: {i.arch: i.dl.path for i in items}})
+            if published:
+                ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
+            if args.check:
+                console.stage(4, total, "Running the 14 bot checks locally (--check)")
+                report = run_live(ctx)
+            else:
+                ctx.data["offline"] = True
+                console.stage(4, total, "Quick check of the cards (the repository bot runs the full 14 steps on your pull request)")
+                checked = quick_check(ctx)
+                report = checked if checked["verdict"] == "fail" else None
+            if report and report["verdict"] == "fail" and not args.force:
+                return _die("the cards have problems - fix the issues above, or pass --force to open the PR anyway")
+            if not args.check:
+                report = None  # the PR body should not claim a full pre-flight that did not run
 
     if args.dry_run:
         console.say("✓ dry run complete - nothing was sent to GitHub")
         return 0
+    if guided and not console.confirm("Would you like to submit your manifest to the TXA repository?", default=True):
+        print(f"Nothing was sent. Submit it later with: txacreate submit \"{saved}\"")
+        return 0
 
-    # 6. fork → branch → commit → PR  (the first step that needs GitHub access)
-    console.stage(5, total, "Forking the repository and opening the pull request")
+    # 4. fork → branch → commit → PR  (the first step that needs GitHub access)
+    console.stage(total, total, "Forking the repository and opening the pull request")
     try:
         gh, login = _sign_in(args.token)
     except GitHubError as exc:
         return _die(f"{exc}\n  (or pass --token <PAT> / set TXA_TOKEN)")
     existing_pr = None if args.force else _safe(lambda: _find_pr(gh, upstream, draft))
     if existing_pr:
-        return _die(f"an open pull request already covers {package_id} {draft.version}: {existing_pr}")
+        return _die(f"an open pull request already covers {draft.package_id} {draft.version}: {existing_pr}")
     kind = "New version" if published else "New package"
-    title = f"{kind}: {package_id} {draft.version}"
     files = {f"{draft.directory}/{name}": text for name, text in rendered.items()}
+    console.say("Submitting pull request for manifest...")
     try:
         from txa.create.submit import submit
 
-        result = submit(gh, upstream, login, package_id, draft.version, files, title,
-                        _pr_body(kind, draft, analysed, report), direct=args.direct)
+        result = submit(gh, upstream, login, draft.package_id, draft.version, files,
+                        f"{kind}: {draft.package_id} {draft.version}", _pr_body(kind, draft, items, report),
+                        direct=args.direct)
     except GitHubError as exc:
         return _die(str(exc))
-    console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
+    console.say(f"\n✓ pull request #{result.number} opened. Pull request can be found here: "
+                f"{console.paint(result.url, 'cyan', 'bold')}")
     _open_pull_request(result.url, args)
-    print(console.paint(f"  branch {result.head_repo}@{result.branch} · the TXA Bot will now run its 16 steps", "gray"))
+    print(console.paint(f"  branch {result.head_repo}@{result.branch} · the TXA bot starts its 16 checks now; "
+                        f"tick the checklist in the description to confirm", "gray"))
     return 0
+
+
+def _github_client() -> GitHub:
+    token = credentials.load_token()[0]
+    return GitHub(token) if token else GitHub()
 
 
 def _safe(fn):
@@ -476,28 +563,43 @@ def _find_pr(gh: GitHub, upstream: str, draft: Draft) -> str | None:
     return find_open_pr(gh, upstream, draft.package_id, draft.version)
 
 
-def _pr_body(kind: str, draft: Draft, analysed, report: dict | None) -> str:
-    build = winos.parse_build(draft.min_build)
-    lines = [
-        f"## 📦 {kind}: `{draft.package_id}` {draft.version}", "",
-        "| Field | Value |", "|---|---|",
-        f"| Name | {draft.name} |",
-        f"| Publisher | {draft.publisher} |",
-        f"| License | {draft.license_name} |",
-        f"| Minimum Windows | {draft.min_build} ({winos.describe(build)}) |",
-        f"| Scope | {draft.scope} |", "",
-        "### Installers", "",
-        "| Arch | Engine | Size | SHA-256 |", "|---|---|---|---|",
+def _checklist(repo: str) -> list[str]:
+    """Boxes the contributor ticks in the pull request description; the bot waits for all of them."""
+    return [
+        "## ✅ Checklist", "",
+        f"- [ ] I read the [contribution guide](https://github.com/{repo}#readme)",
+        "- [ ] Linked to an issue (if applicable)", "  - Resolves #[Issue Number]", "",
+        "## 📦 Manifest Checklist", "",
+        f"- [ ] Checked that there aren't other open [pull requests](https://github.com/{repo}/pulls) for the same manifest update/change",
+        "- [ ] This PR only modifies one (1) manifest",
+        "- [ ] Validated manifest locally with `txacreate validate <path>`",
+        "- [ ] Tested manifest locally with `txapm install --manifest <path>`",
+        f"- [ ] Manifest conforms to the [v1 schema](https://github.com/{repo}/tree/main/tools/src/txa/schemas)", "",
+        "> **Note:** `<path>` is the directory containing the manifest you're submitting.", "",
+        "> The bot keeps this pull request blocked until every box above is ticked. "
+        "A TXA moderator then reviews it; nothing is published before they approve.",
     ]
-    for url, dl, found, arch, engine in analysed:
-        lines.append(f"| {arch} | {found.label} (`{engine}`) | {dl.bytes / 1048576:.2f} MiB | `{dl.sha256}` |")
+
+
+def _pr_body(kind: str, draft: Draft, items: list[Item], report: dict | None) -> str:
+    """The pull request description: what it is, plus a checklist the contributor ticks to confirm."""
+    repo = config.get("upstream")
+    path = draft.directory
+    lines = [
+        "## 📖 Description", "",
+        f"{kind}: **{draft.name}** (`{draft.package_id}`) {draft.version} - {draft.summary}", "",
+        "| Publisher | License | Minimum Windows | Scope |", "|---|---|---|---|",
+        f"| {draft.publisher} | {draft.license_name} | {draft.min_build} ({winos.describe(winos.parse_build(draft.min_build))}) | {draft.scope} |", "",
+        "| CPU | Type | Size | SHA-256 |", "|---|---|---|---|",
+    ]
+    for item in items:
+        lines.append(f"| {item.arch} | {ENGINE_NAMES.get(item.engine, item.engine)} | {item.dl.bytes / 1048576:.2f} MiB | `{item.dl.sha256}` |")
+    lines += ["", *_checklist(repo), "", "---", f"<sub>Submitted with txacreate {__version__} · cards in `{path}/`</sub>"]
     if report:
         counts: dict[str, int] = {}
         for row in report["results"]:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
-        summary = " · ".join(f"{k} {v}" for k, v in sorted(counts.items()))
-        lines += ["", f"**Local pre-flight (txaci):** {summary}"]
-    lines += ["", "---", f"<sub>Submitted with txacreate {__version__} · cards in `{draft.directory}/`</sub>"]
+        lines.insert(len(lines) - 2, f"**Local pre-flight (txaci):** {' · '.join(f'{k} {v}' for k, v in sorted(counts.items()))}")
     return "\n".join(lines)
 
 
@@ -568,8 +670,9 @@ def cmd_submit(args) -> int:
     kind = "New version" if published else "New package"
     target_dir = release_dir(package_id, version)
     files = {f"{target_dir}/{name}": raw.decode("utf-8") for name, raw in bundle.files.items() if kind_of(name)}
-    body = (f"## 📦 {kind}: `{package_id}` {version}\n\nSubmitted from a local folder with "
-            f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).\n\n<sub>txacreate {__version__}</sub>")
+    body = "\n".join([f"## 📖 Description", "", f"{kind}: `{package_id}` {version} - submitted from a local folder with "
+                      f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).", "",
+                      *_checklist(upstream), "", "---", f"<sub>Submitted with txacreate {__version__}</sub>"])
     result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
                     direct=args.direct)
     console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")

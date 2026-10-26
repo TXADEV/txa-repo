@@ -55,6 +55,7 @@ txapm --version
 | Cài nhưng vẫn xem tiến trình | `txapm install TXAVL.HelloTool --progress` |
 | Cài với giao diện gốc của bộ cài | `txapm install TXAVL.HelloTool --interactive` |
 | Chỉ tải về, không cài | `txapm install TXAVL.HelloTool --download-only` |
+| Thử một manifest trên máy trước khi gửi | `txapm install --manifest <thư-mục>` |
 | Xem gói đã cài | `txapm list` |
 | Xem gói có bản mới | `txapm list --upgrade-available` |
 | Nâng cấp một gói | `txapm upgrade TXAVL.HelloTool` |
@@ -164,20 +165,24 @@ Ai có tài khoản GitHub cũng gửi được, không cần biết viết YAML
 txacreate new https://vendor.example/app-2.1.0-x64.exe
 ```
 
-TXA tự tải file, đọc tên phần mềm, phiên bản, nhà phát hành và loại bộ cài, rồi hỏi thêm vài thông tin
-còn thiếu. Giấy phép được **chọn từ danh sách** (gõ số, hoặc gõ tên như `MIT`, `Apache 2.0`):
+`txacreate` hỏi từng câu như một trình hướng dẫn: mỗi câu có ví dụ và **giá trị gợi ý** (bấm Enter để nhận,
+gõ để thay thế). Link GitHub Releases được tự điền tên, nhà phát hành, giấy phép, mô tả.
 
 ```
-  Choose a license
-     1) MIT                 permissive, very short
-     2) Apache-2.0          permissive, with a patent grant
-     ...
-    13) Freeware            closed source, free to use (needs a link to the terms)
-    14) Proprietary         closed source / commercial (needs a link to the terms)
-    15) Other               type any SPDX identifier
+For additional information about the restrictions for each field, visit https://github.com/TXAVL/txa-repo#readme
+Press ENTER to submit the value for each question including accepting the (default) value.
+Please enter values for the following fields:
+
+The package unique identifier |e.g. TXAVL.HelloTool| [id] value is: TXAVL.HelloTool
+The package version |e.g. 1.2.3| [version] value is: 2.1.0
+Select architecture (use ↑/↓, Enter to accept): x64
 ```
 
-Xong TXA chỉ **kiểm tra nhanh** các file YAML (vài giây, không cần mạng) rồi mở Pull Request.
+Giấy phép **chọn bằng mũi tên hoặc gõ số / tên** (`MIT`, `Apache 2.0`…), mỗi loại có giải thích bên cạnh.
+Sau đó TXA hỏi có muốn sửa các trường tuỳ chọn không, tạo **bản xem trước 3 file YAML**, kiểm tra nhanh
+(`Manifest validation succeeded: True`) rồi hỏi `Would you like to make changes to this manifest? (y/n)`
+(`y` = nhập lại, `n` = tiếp tục). File được lưu ở `%USERPROFILE%\manifests\...` và TXA hỏi
+`Would you like to submit your manifest to the TXA repository? (y/n)`.
 14 bước kiểm tra đầy đủ do bot chạy trên Pull Request; muốn tự chạy trước thì thêm `--check`.
 
 **2. Cấp quyền GitHub — chỉ ở bước cuối.** Khi sắp fork kho và mở Pull Request, TXA mới hiện:
@@ -218,6 +223,12 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 
 ### Sau khi gửi Pull Request
 
+Mô tả của PR có một **checklist bạn tự tick**: đã đọc hướng dẫn, không có PR trùng, chỉ sửa một manifest,
+đã chạy `txacreate validate <thư-mục>`, đã thử `txapm install --manifest <thư-mục>`, đúng schema.
+Bot đăng huy hiệu sức khoẻ (Validation Pipeline / Publish Pipeline), liệt kê **16 check đánh số**
+(`01. …` → `16. …`, từng cái chuyển từ *Queued* sang xong) và giữ PR ở trạng thái chờ cho tới khi mọi ô được tick
+(nhãn `txa:needs-confirmation`). Sau khi qua kiểm tra, bot báo cần một Contributor/moderator duyệt.
+
 Ngay khi PR được mở, bot đăng một **bảng tiến trình** và tự cập nhật từng bước ngay trong PR
 (⏳ chờ → 🔄 đang chạy → ✅ xong / ❌ lỗi, kèm thời gian mỗi bước):
 
@@ -240,12 +251,22 @@ liệt kê chi tiết từng bước như khi chạy bằng dòng lệnh.
 | `txa:awaiting-review` | qua kiểm tra, chờ moderator duyệt |
 | `txa:approved` | moderator đã duyệt, sẽ tự gộp |
 | `txa:published` | **đã gộp** — gói đã nằm trong kho |
+| `txa:needs-confirmation` | checklist trong mô tả PR chưa tick đủ |
 | `txa:fix-required` | có lỗi — đọc comment của bot, sửa rồi push lại, bot tự chạy lại |
 | `txa:new-app` / `txa:new-version` | gói mới / phiên bản mới |
 
 Nhãn đi theo đúng vòng đời, không còn nhãn cũ nằm lại: duyệt xong thì `awaiting-review` đổi thành `approved`,
 gộp xong đổi thành `published` và bot ghi sẵn lệnh `txapm install` vào bình luận. Khoảng hai phút sau mọi người
 cài được gói đó.
+
+**Gói đang chờ duyệt vẫn hiện trong kho** (`pending.json`) kèm trạng thái, nhưng **chưa cài được**:
+
+```
+txapm search hello   →  bảng "Waiting for review - cannot be installed yet"
+txapm install hello →  cannot be installed yet - waiting for a Contributor/moderator to review and approve it
+```
+
+Chỉ khi Contributor duyệt và PR được gộp thì `txapm install` mới cài được.
 
 `txacreate` tự mở trang PR trên trình duyệt ngay khi tạo xong (thêm `--no-browser` nếu không muốn).
 

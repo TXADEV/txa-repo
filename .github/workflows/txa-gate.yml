@@ -16,6 +16,7 @@ permissions:
   # trusted default-branch code and never checks out or executes anything from the pull request.
   contents: write
   actions: read
+  checks: write
   issues: write
   pull-requests: write
   statuses: write

@@ -68,7 +68,7 @@ def index_document(packages: dict[str, dict[str, dict]]) -> dict:
     return {"api": "txa.v1", "generated": generated, "count": len(index), "packages": index}
 
 
-def build_api(repo_root: Path, out: Path) -> dict:
+def build_api(repo_root: Path, out: Path, pending: list[dict] | None = None) -> dict:
     packages, skipped = collect(repo_root)
     api = out / API_NAMESPACE
     (api / "packages").mkdir(parents=True, exist_ok=True)
@@ -77,6 +77,9 @@ def build_api(repo_root: Path, out: Path) -> dict:
         (api / "packages" / f"{package_id}.json").write_text(json.dumps(document, ensure_ascii=False, indent=1), "utf-8")
     manifest = index_document(packages)
     index, generated = manifest["packages"], manifest["generated"]
+    waiting = sorted(pending or [], key=lambda e: (e["id"].lower(), e["version"]))
+    (api / "pending.json").write_text(json.dumps(
+        {"api": "txa.v1", "generated": generated, "count": len(waiting), "packages": waiting}, ensure_ascii=False, indent=1), "utf-8")
     (api / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
     (out / ".nojekyll").write_text("", "utf-8")
     rows = "".join(
@@ -91,4 +94,4 @@ def build_api(repo_root: Path, out: Path) -> dict:
         f"<table><tr><th>Id</th><th>Latest</th><th>Summary</th></tr>{rows}</table>",
         "utf-8",
     )
-    return {"packages": len(index), "skipped": skipped, "out": str(api)}
+    return {"packages": len(index), "pending": len(waiting), "skipped": skipped, "out": str(api)}
