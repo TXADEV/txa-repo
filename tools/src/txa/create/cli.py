@@ -48,14 +48,30 @@ def cmd_login(args) -> int:
             print("  Waiting for you to authorize TXA in the browser…")
         token = device_flow(config.get("client_id"), args.scope, show)
         source = "device flow"
-    response = GitHub(token).request("GET", "user")
-    login = response.json()["login"]
+    gh = GitHub(token)
+    response = gh.request("GET", "user")
+    user = response.json()
+    login = user["login"]
     scopes = response.headers.get("X-OAuth-Scopes")
     if scopes is not None and not {"repo", "public_repo"} & {s.strip() for s in scopes.split(",")}:
         print("  ! token has no repo/public_repo scope - forking and opening PRs will fail")
-    path = credentials.save_token(token, login, source)
-    print(f"✓ logged in as {login} via {source}; credential saved to {path}")
+    email = _primary_email(gh, user)
+    path = credentials.save_token(token, login, source, email)
+    print(f"✓ logged in as {login} <{email or 'email hidden'}> via {source}")
+    print(f"  credential saved to {path} (encrypted for this Windows account)")
     return 0
+
+
+def _primary_email(gh: GitHub, user: dict) -> str | None:
+    """Public profile email, else the primary verified one (needs the user:email scope)."""
+    if user.get("email"):
+        return user["email"]
+    response = gh.request("GET", "user/emails", ok=(403, 404))
+    if response.status_code != 200:
+        return None
+    emails = response.json()
+    primary = next((e for e in emails if e.get("primary") and e.get("verified")), None)
+    return (primary or next(iter(emails), {})).get("email")
 
 
 def cmd_logout(_args) -> int:
@@ -67,7 +83,15 @@ def cmd_whoami(_args) -> int:
     token, source = credentials.load_token()
     if not token:
         return _die("not logged in - run `txacreate login`")
-    print(f"{GitHub(token).get('user')['login']} (token from {source}) → upstream {config.get('upstream')}")
+    gh = GitHub(token)
+    user = gh.get("user")
+    record = credentials.stored() or {}
+    email = record.get("email") if record.get("login") == user["login"] else None
+    email = email or _primary_email(gh, user)
+    print(f"user      {user['login']}")
+    print(f"email     {email or '(hidden - run `txacreate login` again to grant user:email)'}")
+    print(f"token     {source}")
+    print(f"upstream  {config.get('upstream')}")
     return 0
 
 
@@ -400,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("login", help="authenticate with GitHub (Device Code Flow or PAT)")
     p.add_argument("--token", help="personal access token (prefer --with-token: flags end up in shell history)")
     p.add_argument("--with-token", action="store_true", help="read a personal access token from stdin")
-    p.add_argument("--scope", default="public_repo", help="OAuth scope for the device flow (default public_repo)")
+    p.add_argument("--scope", default="public_repo user:email", help="OAuth scopes for the device flow")
     p.add_argument("--no-browser", action="store_true", help="do not open the verification page automatically")
     p.set_defaults(func=cmd_login)
 

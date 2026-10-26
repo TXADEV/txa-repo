@@ -64,11 +64,11 @@ else:
         return data
 
 
-def save_token(token: str, login: str, source: str) -> Path:
+def save_token(token: str, login: str, source: str, email: str | None = None) -> Path:
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({
-        "token": token, "login": login, "source": source,
+        "token": token, "login": login, "email": email, "source": source,
         "saved": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }).encode("utf-8")
     path.write_bytes(_protect(payload))
