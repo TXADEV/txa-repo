@@ -46,8 +46,11 @@ def _is_public(address: str) -> bool:
         return False
 
 
-def assert_public_https(url: str) -> None:
-    """Reject anything that is not plain HTTPS to a public host (SSRF guard on CI runners)."""
+def assert_public_https(url: str, allow_private: bool = False) -> None:
+    """Reject anything that is not plain HTTPS to a public host (SSRF guard on CI runners).
+
+    ``allow_private`` lets a client reach company servers on the LAN; CI never sets it.
+    """
     parts = urlsplit(url)
     if parts.scheme != "https":
         raise UnsafeURL(f"{url}: only https:// is allowed (got {parts.scheme or 'no scheme'})")
@@ -55,9 +58,11 @@ def assert_public_https(url: str) -> None:
         raise UnsafeURL(f"{url}: missing host")
     if parts.username or parts.password:
         raise UnsafeURL(f"{url}: credentials inside URLs are not allowed")
-    if parts.port not in (None, 443):
+    if parts.port not in (None, 443) and not allow_private:
         raise UnsafeURL(f"{url}: non-standard port {parts.port}")
     host = parts.hostname
+    if allow_private:
+        return
     try:
         ipaddress.ip_address(host)
         raise UnsafeURL(f"{url}: raw IP addresses are not allowed, use a hostname")
@@ -101,14 +106,14 @@ def _normalized(url: str) -> str:
 
 
 def walk(s: requests.Session, url: str, method: str = "HEAD", max_hops: int = 8, timeout: float = 30,
-         headers: dict | None = None) -> tuple[requests.Response, list[Hop]]:
+         headers: dict | None = None, allow_private: bool = False) -> tuple[requests.Response, list[Hop]]:
     """Follow redirects by hand so every hop is checked; raises on loops or downgrades."""
     hops: list[Hop] = []
     seen: set[str] = set()
     paths: Counter[str] = Counter()
     current = url
     for _ in range(max_hops + 1):
-        assert_public_https(current)
+        assert_public_https(current, allow_private)
         if current in seen:
             raise RedirectLoop(" -> ".join(h.url for h in hops) + f" -> {current}")
         seen.add(current)
@@ -201,10 +206,11 @@ class Download:
 
 def download(s: requests.Session, url: str, dest_dir: Path, max_bytes: int, max_hops: int = 8,
              timeout: float = 60, attempts: int = 3,
-             on_progress: Callable[[int, int | None], None] | None = None) -> Download:
+             on_progress: Callable[[int, int | None], None] | None = None,
+             allow_private: bool = False, headers: dict | None = None) -> Download:
     """Stream to disk, hashing on the fly; resume with Range when the stream breaks."""
     dest_dir.mkdir(parents=True, exist_ok=True)
-    response, hops = walk(s, url, "GET", max_hops, timeout)
+    response, hops = walk(s, url, "GET", max_hops, timeout, headers, allow_private)
     if response.status_code != 200:
         response.close()
         raise NetError(f"{hops[-1].url}: HTTP {response.status_code}")
@@ -244,7 +250,7 @@ def download(s: requests.Session, url: str, dest_dir: Path, max_bytes: int, max_
                 attempt += 1
                 accepts_ranges = headers.get("accept-ranges", "").lower() == "bytes"
                 if accepts_ranges and written:
-                    response, _ = walk(s, url, "GET", max_hops, timeout, headers={"Range": f"bytes={written}-"})
+                    response, _ = walk(s, url, "GET", max_hops, timeout, {**(headers or {}), "Range": f"bytes={written}-"}, allow_private)
                     if response.status_code == 206:
                         resumed = True
                         continue
@@ -254,7 +260,7 @@ def download(s: requests.Session, url: str, dest_dir: Path, max_bytes: int, max_
                 out.truncate()
                 digest = hashlib.sha256()
                 written = 0
-                response, _ = walk(s, url, "GET", max_hops, timeout)
+                response, _ = walk(s, url, "GET", max_hops, timeout, headers, allow_private)
     return Download(target, final_url, written, expected, digest.hexdigest().upper(), attempt, resumed, headers)
 
 

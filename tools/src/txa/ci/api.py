@@ -25,7 +25,8 @@ def _valid(bundle: Bundle) -> list[str]:
     return problems
 
 
-def build_api(repo_root: Path, out: Path) -> dict:
+def collect(repo_root: Path) -> tuple[dict[str, dict[str, dict]], list[dict]]:
+    """Read every valid release under manifests/ -> ({id: {version: cards}}, skipped)."""
     packages: dict[str, dict[str, dict]] = {}
     skipped = []
     for release in sorted((repo_root / "manifests").glob("*/*/*/*")):
@@ -37,30 +38,44 @@ def build_api(repo_root: Path, out: Path) -> dict:
             skipped.append({"path": release.relative_to(repo_root).as_posix(), "problems": problems[:5]})
             continue
         packages.setdefault(bundle.package_id, {})[bundle.version] = assemble(bundle)
+    return packages, skipped
 
-    api = out / API_NAMESPACE
-    (api / "packages").mkdir(parents=True, exist_ok=True)
-    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+def package_document(package_id: str, versions: dict[str, dict]) -> dict:
+    ordered = sorted(versions, key=semver.parse, reverse=True)
+    return {"api": "txa.v1", "id": package_id, "latest": ordered[0], "versions": {v: versions[v] for v in ordered}}
+
+
+def index_document(packages: dict[str, dict[str, dict]]) -> dict:
     index = []
     for package_id in sorted(packages, key=str.lower):
-        versions = packages[package_id]
-        ordered = sorted(versions, key=semver.parse, reverse=True)
-        latest = versions[ordered[0]]
+        document = package_document(package_id, packages[package_id])
+        latest = document["versions"][document["latest"]]
         about = latest["about"].get(latest["core"]["locale"]["default"]) or next(iter(latest["about"].values()))
-        document = {"api": "txa.v1", "id": package_id, "latest": ordered[0], "versions": {v: versions[v] for v in ordered}}
-        (api / "packages" / f"{package_id}.json").write_text(json.dumps(document, ensure_ascii=False, indent=1), "utf-8")
         index.append({
             "id": package_id,
             "alias": latest["core"]["package"].get("alias"),
-            "latest": ordered[0],
-            "versions": ordered,
+            "latest": document["latest"],
+            "versions": list(document["versions"]),
             "name": about["name"],
             "publisher": about["publisher"],
             "summary": about["summary"],
             "tags": latest["core"].get("tags", []),
             "arches": [t["arch"] for t in latest["build"]["targets"]],
         })
-    manifest = {"api": "txa.v1", "generated": generated, "count": len(index), "packages": index}
+    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return {"api": "txa.v1", "generated": generated, "count": len(index), "packages": index}
+
+
+def build_api(repo_root: Path, out: Path) -> dict:
+    packages, skipped = collect(repo_root)
+    api = out / API_NAMESPACE
+    (api / "packages").mkdir(parents=True, exist_ok=True)
+    for package_id, versions in packages.items():
+        document = package_document(package_id, versions)
+        (api / "packages" / f"{package_id}.json").write_text(json.dumps(document, ensure_ascii=False, indent=1), "utf-8")
+    manifest = index_document(packages)
+    index, generated = manifest["packages"], manifest["generated"]
     (api / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
     (out / ".nojekyll").write_text("", "utf-8")
     rows = "".join(

@@ -69,3 +69,25 @@ def api_base() -> str:
 
 def keys() -> list[str]:
     return sorted(_DEFAULTS)
+
+
+# --------------------------------------------------------------------------- sources
+
+OFFICIAL_SOURCE = "txa"
+
+
+def sources() -> list[dict]:
+    """Configured package sources in priority order; the official `txa` source is always first."""
+    cfg = load_config()
+    official = {"name": OFFICIAL_SOURCE, "url": api_base(), "enabled": not cfg.get("txa_disabled"), "official": True}
+    return [official, *[{"enabled": True, **item} for item in cfg.get("sources", [])]]
+
+
+def save_custom_sources(items: list[dict], official_enabled: bool = True) -> None:
+    cfg = load_config()
+    cfg["sources"] = [{k: v for k, v in item.items() if k != "official"} for item in items if not item.get("official")]
+    if official_enabled:
+        cfg.pop("txa_disabled", None)
+    else:
+        cfg["txa_disabled"] = True
+    save_config(cfg)

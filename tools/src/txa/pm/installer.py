@@ -49,10 +49,16 @@ def check_os(build: dict) -> None:
                            f"this machine runs {winos.fmt(current)}")
 
 
-def fetch(package_id: str, version: str, target: dict, on_progress=None) -> Path:
-    """Download into %TEMP%\\txa\\<id>\\<version>\\<arch> and verify SHA-256 before returning."""
+def fetch(package_id: str, version: str, target: dict, on_progress=None, source=None) -> Path:
+    """Download into %TEMP%\\txa\\<id>\\<version>\\<arch> and verify SHA-256 before returning.
+
+    ``source`` (a pm.source.Source) may allow LAN hosts and lend its credentials to its own host.
+    """
     dest = config.temp_root() / package_id / version / target["arch"]
-    result = net.download(net.session(), target["source"]["url"], dest, MAX_DOWNLOAD, on_progress=on_progress)
+    url = target["source"]["url"]
+    result = net.download(net.session(), url, dest, MAX_DOWNLOAD, on_progress=on_progress,
+                          allow_private=bool(source and source.allow_lan),
+                          headers=source.download_headers(url) if source else None)
     expected = str(target["source"]["sha256"]).upper()
     if not hmac.compare_digest(result.sha256, expected):
         result.path.unlink(missing_ok=True)
@@ -153,11 +159,12 @@ def installed() -> dict:
         return {}
 
 
-def record(package_id: str, version: str, target: dict, exit_code: int, name: str, scope: str) -> None:
+def record(package_id: str, version: str, target: dict, exit_code: int, name: str, scope: str,
+           source: str = config.OFFICIAL_SOURCE) -> None:
     data = installed()
     data[package_id] = {
         "version": version, "arch": target["arch"], "engine": target["engine"], "exit_code": exit_code,
-        "name": name, "scope": scope, "installed": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "name": name, "scope": scope, "source": source, "installed": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     _save(data)
 

@@ -66,7 +66,7 @@ txapm --version
 | Giữ nguyên phiên bản, không cho `upgrade --all` đụng vào | `txapm pin add TXAVL.HelloTool` |
 | Bỏ giữ / xem danh sách đang giữ | `txapm pin remove TXAVL.HelloTool` · `txapm pin list` |
 | Tải bộ cài + manifest về thư mục (mặc định Downloads) | `txapm download TXAVL.HelloTool -d D:\setup` |
-| Xem / đổi nguồn gói | `txapm source` · `txapm source set <url>` · `txapm source reset` |
+| Xem các kho nguồn | `txapm source` (xem mục [Kho nguồn riêng](#kho-nguồn-riêng)) |
 | Thông tin cài đặt, đường dẫn, tài khoản | `txapm --info` |
 
 Gói nào có tên ngắn (alias) thì gõ tên ngắn cũng được, ví dụ `txapm install hellotool`.
@@ -80,6 +80,47 @@ Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls`
 4. Tải về `%TEMP%\txa\…` và so mã SHA-256. Sai một byte là **xoá file và dừng**.
 5. Cài im lặng. Gói cài cho toàn máy sẽ hiện hộp thoại UAC xin quyền admin.
 6. Ghi log vào `%LOCALAPPDATA%\TXA\logs`.
+
+---
+
+## Kho nguồn riêng
+
+Ngoài kho chính `txa`, bạn có thể thêm kho riêng: phần mềm nội bộ công ty, bản build riêng của nhóm…
+Kho riêng chỉ cần phục vụ cùng REST API `txa.v1` (hai file JSON tĩnh), hoặc đơn giản là một thư mục chứa `manifests/`.
+
+| Muốn làm gì | Lệnh |
+|---|---|
+| Xem các kho | `txapm source` |
+| Thêm kho HTTPS | `txapm source add congty https://pkgs.congty.vn/api/txa/v1` |
+| Thêm kho là thư mục (ổ mạng, máy cá nhân) | `txapm source add noibo \\server\share\txa` |
+| Kho riêng tư cần token | `txapm source add congty <url> --token-env CONGTY_TOKEN` |
+| Cho phép tải bộ cài từ máy chủ LAN | `txapm source add congty <url> --allow-lan` |
+| Tắt / bật một kho | `txapm source disable txa` · `txapm source enable txa` |
+| Xoá kho | `txapm source remove congty` |
+| Làm mới / sao lưu cấu hình | `txapm source update` · `txapm source export` |
+| Về mặc định (chỉ kho `txa`) | `txapm source reset` |
+| Chỉ tìm / cài từ một kho | `txapm search app -s congty` · `txapm install App -s congty` |
+
+- Kho được hỏi theo thứ tự: `txa` trước, rồi các kho thêm sau. Nếu cùng một Id có ở nhiều kho,
+  TXA dừng và yêu cầu chọn bằng `-s <kho>` để tránh cài nhầm.
+- Gói nhớ nó được cài từ kho nào, nên `txapm upgrade` luôn lấy bản mới từ đúng kho đó.
+- Token không bao giờ được ghi vào file cấu hình: TXA chỉ lưu **tên biến môi trường**, và chỉ gửi
+  token tới đúng máy chủ của kho đó.
+- Kho phải dùng HTTPS (ngoại trừ `http://localhost` để thử nghiệm).
+
+### Tự dựng một kho
+
+1. Tạo thư mục có `manifests/<chữ-cái>/<Namespace>/<AppName>/<X.Y.Z>/` (soạn card bằng
+   `txacreate new <url> --dry-run --out <thư-mục>` cho nhanh).
+2. Dùng ngay dạng thư mục: `txapm source add noibo D:\kho-txa`. Hoặc sinh REST API tĩnh:
+   ```powershell
+   txaci build-api --root D:\kho-txa --out D:\kho-txa-site
+   ```
+3. Đưa thư mục `D:\kho-txa-site` lên bất kỳ máy chủ HTTPS nào (IIS, nginx, GitHub Pages, S3…), rồi
+   `txapm source add congty https://<máy-chủ>/api/txa/v1`.
+
+Muốn có cả bot kiểm định 16 bước như kho chính: fork repo này, thay namespace trong `policy.txa.yaml`,
+chạy `scripts/setup-github.ps1 -Owner <tổ-chức>`.
 
 ---
 
