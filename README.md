@@ -223,6 +223,16 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 
 ### Sau khi gửi Pull Request
 
+**Việc đầu tiên sau khi tạo PR là chấp nhận Contributor Agreement (EULA).** Bot comment ngay: *"This PR cannot be merged
+until you accept the Contributor Agreement"*. Bạn trả lời đúng một comment:
+
+```
+@txa-repo agree
+```
+
+Bot tự **xoá comment đó**, đánh dấu bước này là đã xong (`✅ Contributor Agreement accepted`) và bỏ nhãn
+`txa:needs-agreement`. Chưa chấp nhận thì PR không thể gộp. Chỉ comment của chính người mở PR mới có hiệu lực.
+
 Mô tả của PR có một **checklist bạn tự tick**: đã đọc hướng dẫn, không có PR trùng, chỉ sửa một manifest,
 đã chạy `txacreate validate <thư-mục>`, đã thử `txapm install --manifest <thư-mục>`, đúng schema.
 Bot đăng huy hiệu sức khoẻ (Validation Pipeline / Publish Pipeline), liệt kê **16 check đánh số**
@@ -251,6 +261,7 @@ liệt kê chi tiết từng bước như khi chạy bằng dòng lệnh.
 | `txa:awaiting-review` | qua kiểm tra, chờ moderator duyệt |
 | `txa:approved` | moderator đã duyệt, sẽ tự gộp |
 | `txa:published` | **đã gộp** — gói đã nằm trong kho |
+| `txa:needs-agreement` | bạn chưa chấp nhận Contributor Agreement — comment `@txa-repo agree` |
 | `txa:needs-confirmation` | checklist trong mô tả PR chưa tick đủ |
 | `txa:fix-required` | có lỗi — đọc comment của bot, sửa rồi push lại, bot tự chạy lại |
 | `txa:new-app` / `txa:new-version` | gói mới / phiên bản mới |

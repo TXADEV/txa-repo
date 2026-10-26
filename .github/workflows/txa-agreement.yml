@@ -1,0 +1,51 @@
+# TXA Agreement - the first step after a pull request is opened: the Contributor Agreement.
+#
+# The bot asks the author to comment "@txa-repo agree"; when they do it deletes that comment,
+# marks the step as done and lets the checks proceed. Runs trusted default-branch code only;
+# comment text is read as data and never executed.
+name: TXA Agreement
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: txa-agreement-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  agreement:
+    name: contributor agreement
+    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install trusted TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./tools
+
+      - name: Ask for / accept the agreement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          if [ -n "$COMMENT_ID" ]; then extra="--comment-id $COMMENT_ID"; else extra=""; fi
+          txaci gate agreement --pr "$PR_NUMBER" $extra

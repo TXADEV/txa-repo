@@ -113,6 +113,12 @@ def cmd_gate(args) -> int:
         if not args.head_sha:
             raise SystemExit("txaci gate triage: --head-sha is required")
         return gate.triage(gh, repo, report, args.head_sha, state, args.run_url, args.run_id)
+    if args.action == "agreement":
+        from txa.ci import agreement
+
+        if not args.pr:
+            raise SystemExit("txaci gate agreement: --pr is required")
+        return agreement.process(gh, repo, args.pr, args.comment_id)
     if args.action == "progress":
         from txa.ci import progress
 
@@ -188,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_validate)
 
     p = sub.add_parser("gate", help="trusted workflows only: triage (STEP 15), merge (STEP 16), progress, lifecycle")
-    p.add_argument("action", choices=["triage", "merge", "progress", "lifecycle"])
+    p.add_argument("action", choices=["triage", "merge", "progress", "lifecycle", "agreement"])
     p.add_argument("--report")
     p.add_argument("--head-sha")
     p.add_argument("--repo")
@@ -197,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pr", type=int, help="progress / lifecycle: pull request number")
     p.add_argument("--closed", action="store_true", help="lifecycle: the pull request was closed")
     p.add_argument("--merged", action="store_true", help="lifecycle: ... by merging")
+    p.add_argument("--comment-id", type=int, help="agreement: the comment that may contain the acceptance")
     p.add_argument("--backfill", action="store_true", help="lifecycle: fix every closed PR that still carries in-flight labels")
     p.set_defaults(func=cmd_gate)
 

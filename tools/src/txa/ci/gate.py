@@ -105,6 +105,14 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         wanted.add(_label("fix"))
         state, description = "error", reason or "validation did not complete"
 
+    # first of all: the Contributor Agreement - until the author accepts it nothing may merge
+    from txa.ci import agreement
+
+    agreed = agreement.is_signed(gh, repo, pr)
+    if not agreed and state == "success":
+        wanted.add(_label("agree"))
+        state, description = "pending", "Waiting for the contributor to accept the agreement"
+
     # the contributor must tick the checklist in the description; until then nothing may merge
     open_boxes = checklist(pr.get("body"))
     if open_boxes and state == "success":
@@ -357,8 +365,8 @@ def backfill(gh: GitHub, repo: str) -> int:
 def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> None:
     number = pr["number"]
     current = {label["name"] for label in pr.get("labels", [])}
-    names = {key: _label(key) for key in ("validating", "verified", "fix", "review", "approved", "published", "confirm", "infra")}
-    in_flight = {names[k] for k in ("validating", "fix", "review", "approved", "confirm")}
+    names = {key: _label(key) for key in ("validating", "verified", "fix", "review", "approved", "published", "confirm", "infra", "agree")}
+    in_flight = {names[k] for k in ("validating", "fix", "review", "approved", "confirm", "agree")}
     if closed:
         add = {names["published"]} if merged else set()
         set_labels(gh, repo, number, current, add=add, remove=in_flight)
@@ -398,6 +406,8 @@ def _sync_confirmation(gh: GitHub, repo: str, pr: dict, current: set[str], names
     else:
         set_labels(gh, repo, number, current, add=set(), remove={names["confirm"]})
         state, description = "success", ok_text
+        if names["agree"] in current:
+            state, description = "pending", "Waiting for the contributor to accept the agreement"
         current = current - {names["confirm"]}
     gh.post(f"repos/{repo}/statuses/{sha}", json={"state": state, "context": STATUS_CONTEXT, "description": description})
     for comment in gh.paginate(f"repos/{repo}/issues/{number}/comments"):
