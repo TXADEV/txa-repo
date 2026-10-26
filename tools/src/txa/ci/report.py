@@ -103,6 +103,29 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
     return "\n".join(lines) + "\n"
 
 
+QUICK_STEPS = (1, 2, 3, 4, 5, 14)  # everything that only needs the YAML cards, no network
+
+
+def quick_check(ctx: Context) -> dict:
+    """Fast offline sanity check of the cards. Silent apart from one line (or the problems found).
+
+    The repository bot runs the full 14 steps on the pull request, so this only catches the
+    mistakes that would make that run fail for a trivial reason (bad YAML, unknown license, ...).
+    """
+    from txa.ci import steps
+
+    for number in QUICK_STEPS:
+        steps.run_step(ctx, number)
+    report = build_report(ctx)
+    problems = [(r["step"], m["text"]) for r in report["results"] if r["status"] == "FAIL"
+                for m in r["messages"] if m["level"] == "fail"]
+    for number, text in problems:
+        console.say(f"✗ STEP {number:02d} {TITLES[number]}: {text}")
+    if not problems:
+        console.say("✓ cards look valid (encoding, YAML, naming, version, license, switches)")
+    return report
+
+
 def run_live(ctx: Context, numbers: list[int] | None = None) -> dict:
     """Run the validation steps, showing each one as it starts and finishes.
 

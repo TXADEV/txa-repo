@@ -10,6 +10,7 @@ from typing import Callable
 
 from txa.ci.context import Context
 from txa.core import engines, net, pe, portable, semver, signing, winos
+from txa.core.licenses import NEEDS_URL, SPDX
 from txa.core.manifest import (
     ABOUT_RE, BUILD_FILE, CORE_FILE, ID_RE, LANG_RE, ManifestError, about_file, kind_of, parse_card, ref_of,
     release_dir, schema_errors,
@@ -352,14 +353,6 @@ def versioning(ctx: Context, target: dict, out: Outcome) -> None:
 
 # =========================================================================== 05
 
-SPDX = {
-    "0BSD", "AFL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later", "Apache-2.0", "Artistic-2.0", "BSD-2-Clause",
-    "BSD-3-Clause", "BSL-1.0", "CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "CDDL-1.0", "EPL-1.0", "EPL-2.0",
-    "EUPL-1.2", "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
-    "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only", "LGPL-3.0-or-later", "MIT", "MIT-0", "MPL-2.0",
-    "OFL-1.1", "PostgreSQL", "Python-2.0", "Unlicense", "Unicode-3.0", "WTFPL", "Zlib",
-}
-NEEDS_URL = {"Proprietary", "Freeware", "Shareware", "Commercial"}
 _PLACEHOLDER = re.compile(r"^(todo|tbd|tba|n/?a|none|null|unknown|test|example|xxx+|\.\.\.|-+|lorem ipsum.*)$", re.I)
 
 

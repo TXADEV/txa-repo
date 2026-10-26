@@ -20,8 +20,8 @@ from pathlib import Path
 from txa import __version__
 from txa.ci import steps
 from txa.ci.context import init_local
-from txa.ci.report import build_report, render_console, run_live
-from txa.core import config, console, credentials, engines, net, semver, winos
+from txa.ci.report import build_report, quick_check, render_console, run_live
+from txa.core import config, console, credentials, engines, licenses, net, semver, winos
 from txa.core.github import GitHub, GitHubError, device_flow
 from txa.core.manifest import ManifestError, split_id
 from txa.create.draft import Draft, TargetDraft, guess_arch, name_from_filename, pascal
@@ -161,6 +161,49 @@ def _ask_until(prompt: str, default: str | None, check=None) -> str:
         console.say(f"    ✗ {problem}")
 
 
+def _license_menu() -> str:
+    """Numbered list of the usual licenses; a name typed instead of a number is understood too."""
+    paint = console.paint
+    print(f"\n  {paint('Choose a license', 'bold')}")
+    for index, (name, note) in enumerate(licenses.COMMON, 1):
+        print(f"    {paint(str(index).rjust(2) + ')', 'cyan')} {console.cell(name, 18, 'bold')} {paint(note, 'gray')}")
+    other = len(licenses.COMMON) + 1
+    print(f"    {paint(str(other).rjust(2) + ')', 'cyan')} {console.cell('Other', 18, 'bold')} {paint('type any SPDX identifier', 'gray')}")
+    while True:
+        answer = console.ask(f"Number 1-{other}, or type a license name").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(licenses.COMMON):
+            return licenses.COMMON[int(answer) - 1][0]
+        if answer.isdigit() and int(answer) == other:
+            answer = console.ask("SPDX identifier (e.g. Zlib, EPL-2.0)").strip()
+        name = licenses.normalize(answer)
+        if name:
+            return name
+        hint = licenses.suggest(answer)
+        console.say(f"    ✗ '{answer}' is not a known license" + (f" - did you mean {', '.join(hint)}?" if hint else ""))
+
+
+def _resolve_license(draft: Draft, interactive: bool) -> str | None:
+    """Make draft.license_name a recognised identifier. Returns an error message, or None when fine."""
+    name = licenses.normalize(draft.license_name) if draft.license_name else None
+    if draft.license_name and not name:
+        hint = licenses.suggest(draft.license_name)
+        problem = f"'{draft.license_name}' is not a recognised license" + (f" (did you mean {', '.join(hint)}?)" if hint else "")
+        if not interactive:
+            return problem + " - use an SPDX id such as MIT, or Freeware / Proprietary together with --license-url"
+        console.say(f"! {problem}")
+    if not name:
+        if not interactive:
+            return "missing --license (e.g. --license MIT)"
+        name = _license_menu()
+    draft.license_name = name
+    if licenses.needs_url(name) and not draft.license_url:
+        if not interactive:
+            return f"license '{name}' needs --license-url (a link to its terms)"
+        draft.license_url = _ask_until(f"Link to the {name} terms (https://…)", None,
+                                       lambda v: None if v.startswith("https://") else "must start with https://")
+    return None
+
+
 def _per_url(value: str | None, count: int) -> list[str | None]:
     if not value:
         return [None] * count
@@ -268,7 +311,6 @@ def cmd_new(args) -> int:
         "publisher": ("Publisher", None),
         "author": ("Author", None),
         "summary": ("Short description (10-160 chars)", lambda v: None if 10 <= len(v) <= 160 else "10-160 characters"),
-        "license_name": ("License (SPDX id, or Proprietary/Freeware)", None),
     }
     missing = [key for key in required if not getattr(draft, key)]
     if draft.version and not semver.is_valid(draft.version):
@@ -278,6 +320,9 @@ def cmd_new(args) -> int:
     for key in missing:
         prompt, check = required[key]
         setattr(draft, key, _ask_until(prompt, getattr(draft, key) or None, check))
+    problem = _resolve_license(draft, interactive)
+    if problem:
+        return _die(problem)
     if published and draft.version in published:
         return _die(f"{package_id} {draft.version} is already published - bump the version")
 
@@ -326,10 +371,18 @@ def cmd_new(args) -> int:
                          payloads={rel: {t.arch: t.payload for t in draft.targets}})
         if published:
             ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
-        console.stage(4, total, "Running the 14 bot checks locally (same code as the repository bot)")
-        report = run_live(ctx)
-        if report["verdict"] == "fail" and not args.force:
-            return _die("pre-flight failed - fix the issues above or pass --force to open the PR anyway")
+        if args.check:
+            console.stage(4, total, "Running the 14 bot checks locally (--check)")
+            report = run_live(ctx)
+        else:
+            ctx.data["offline"] = True
+            console.stage(4, total, "Quick check of the cards (the repository bot runs the full 14 steps on your pull request)")
+            checked = quick_check(ctx)
+            report = checked if checked["verdict"] == "fail" else None
+        if report and report["verdict"] == "fail" and not args.force:
+            return _die("the cards have problems - fix the issues above, or pass --force to open the PR anyway")
+        if not args.check:
+            report = None  # the PR body should not claim a full pre-flight that did not run
 
     if args.dry_run:
         console.say("✓ dry run complete - nothing was sent to GitHub")
@@ -435,8 +488,13 @@ def cmd_submit(args) -> int:
     package_id, version = bundle.package_id, bundle.version
     if not args.no_validate:
         ctx = init_local([folder], offline=args.offline)
-        console.stage(1, 2, f"Validating {console.paint(package_id, 'bold')} {version} with the 14 bot checks")
-        report = run_live(ctx)
+        if args.check:
+            console.stage(1, 2, f"Validating {console.paint(package_id, 'bold')} {version} with the 14 bot checks")
+            report = run_live(ctx)
+        else:
+            ctx.data["offline"] = True
+            console.stage(1, 2, f"Quick check of {console.paint(package_id, 'bold')} {version} (the bot runs all 14 steps on the PR)")
+            report = quick_check(ctx)
         if report["verdict"] == "fail" and not args.force:
             return _die("validation failed - fix the issues above or pass --force")
     console.stage(2 if not args.no_validate else 1, 2 if not args.no_validate else 1,
@@ -518,7 +576,8 @@ def _release_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out", help="write cards under this folder (default ./txa-out for --dry-run)")
     p.add_argument("--dry-run", action="store_true", help="write cards and pre-flight only, no GitHub calls")
     p.add_argument("--offline", action="store_true", help="skip network checks in the pre-flight")
-    p.add_argument("--no-validate", action="store_true", help="skip the local pre-flight")
+    p.add_argument("--no-validate", action="store_true", help="skip the quick check of the cards")
+    p.add_argument("--check", action="store_true", help="run all 14 bot checks locally (slow: downloads, CDN, signature)")
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="open the PR even if pre-flight fails or a PR exists")
     p.add_argument("-y", "--yes", action="store_true", help="never prompt; fail on missing fields")
@@ -560,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("folder", help="folder containing core.txa.yaml, build.txa.yaml, about.<lang>.txa.yaml")
     p.add_argument("--offline", action="store_true", help="skip network checks in the validation")
     p.add_argument("--no-validate", action="store_true")
+    p.add_argument("--check", action="store_true", help="run all 14 bot checks locally instead of the quick check")
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="submit even if validation fails or a PR exists")
     p.add_argument("-t", "--token", help="GitHub personal access token for this run")

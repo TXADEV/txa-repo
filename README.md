@@ -164,8 +164,21 @@ Ai có tài khoản GitHub cũng gửi được, không cần biết viết YAML
 txacreate new https://vendor.example/app-2.1.0-x64.exe
 ```
 
-TXA tự tải file, đọc tên phần mềm, phiên bản, nhà phát hành và loại bộ cài, hỏi thêm vài thông tin
-còn thiếu (mô tả ngắn, giấy phép) và chạy thử 14 bước kiểm tra.
+TXA tự tải file, đọc tên phần mềm, phiên bản, nhà phát hành và loại bộ cài, rồi hỏi thêm vài thông tin
+còn thiếu. Giấy phép được **chọn từ danh sách** (gõ số, hoặc gõ tên như `MIT`, `Apache 2.0`):
+
+```
+  Choose a license
+     1) MIT                 permissive, very short
+     2) Apache-2.0          permissive, with a patent grant
+     ...
+    13) Freeware            closed source, free to use (needs a link to the terms)
+    14) Proprietary         closed source / commercial (needs a link to the terms)
+    15) Other               type any SPDX identifier
+```
+
+Xong TXA chỉ **kiểm tra nhanh** các file YAML (vài giây, không cần mạng) rồi mở Pull Request.
+14 bước kiểm tra đầy đủ do bot chạy trên Pull Request; muốn tự chạy trước thì thêm `--check`.
 
 **2. Cấp quyền GitHub — chỉ ở bước cuối.** Khi sắp fork kho và mở Pull Request, TXA mới hiện:
 
@@ -196,7 +209,8 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 | `txacreate hash setup.exe` | xem SHA-256, kiến trúc, loại bộ cài của một file |
 | `txacreate submit <thư-mục>` | gửi PR cho một gói tự viết tay (đã có 3 file YAML) |
 | `txacreate show TXAVL.HelloTool` | in nội dung manifest đang có trong kho |
-| `txacreate validate <thư-mục>` | tự kiểm tra một gói viết tay |
+| `txacreate new <link> --check` | chạy thử cả 14 bước của bot ngay trên máy (chậm hơn: tải, CDN, chữ ký số) |
+| `txacreate validate <thư-mục>` | chạy 14 bước kiểm tra cho một gói viết tay |
 | `txacreate token` | xem tài khoản GitHub đang dùng (không bắt buộc) |
 | `txacreate token --store` | cấp quyền GitHub trước, không đợi tới lúc gửi |
 | `txacreate token --clear` | quên quyền đã lưu (đăng xuất) |
@@ -246,7 +260,7 @@ Cài bằng pipx thì gỡ bằng `pipx uninstall txa`.
 - `manifests/t/TXAVL/<AppName>/<X.Y.Z>/` — mỗi phiên bản gồm `core.txa.yaml`, `build.txa.yaml`,
   `about.<lang>.txa.yaml` (mẫu có chú thích: [examples](examples/manifests/t/TXAVL/HelloTool/1.4.2/build.txa.yaml)).
 - `tools/` — mã nguồn Python của `txapm`, `txacreate`, `txaci`
-  (`cd tools && python -m pip install -e ".[dev]" && python -m pytest -q`).
+  (`cd tools && python -m pip install -e .`).
 - `.github/workflows/` — bot kiểm định (`txa-validate`, `txa-gate`), API (`txa-publish-api`),
   phát hành (`txa-release`, `txa-pypi` — chạy khi push tag `vX.Y.Z`).
 - `policy.txa.yaml` — giới hạn dung lượng, namespace, vùng kiểm tra CDN.

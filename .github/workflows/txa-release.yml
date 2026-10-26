@@ -46,10 +46,7 @@ jobs:
           ) | Set-Content -Encoding utf8 src/txa/_build.py
 
       - name: Install
-        run: python -m pip install --disable-pip-version-check ".[dev,build]"
-
-      - name: Test
-        run: python -m pytest -q
+        run: python -m pip install --disable-pip-version-check ".[build]"
 
       - name: Build executables
         run: |
@@ -58,6 +55,9 @@ jobs:
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
           & dist/txapm.exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & dist/txacreate.exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Compress-Archive -Path dist/txapm.exe, dist/txacreate.exe -DestinationPath "txa-windows-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v7

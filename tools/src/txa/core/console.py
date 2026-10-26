@@ -6,6 +6,7 @@ redirected, and respect NO_COLOR (off) / FORCE_COLOR (on) / TERM=dumb (off).
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 _CODES = {
@@ -127,6 +128,7 @@ def progress(label_text: str):
     """
     started: list[float] = []
     last = [0.0]
+    longest = [0]
 
     def draw(done: int, total: int | None) -> None:
         if not sys.stderr.isatty():
@@ -152,7 +154,9 @@ def progress(label_text: str):
             line = f"  {label_text} [{bar}] {done * 100 // total:3d}%  {tail}"
         else:
             line = f"  {label_text} {human_size(done)}  {human_size(speed)}/s"
-        sys.stderr.write("\r" + line + "   ")
+        visible = len(re.sub(r"\x1b\[[0-9;]*m", "", line))
+        longest[0] = max(longest[0], visible)
+        sys.stderr.write("\r" + line + " " * (longest[0] - visible + 1))  # blank out leftovers of a longer earlier line
         sys.stderr.flush()
     return draw
 

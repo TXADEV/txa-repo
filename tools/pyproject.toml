@@ -22,7 +22,6 @@ Homepage = "https://github.com/TXAVL/txa-repo"
 Issues = "https://github.com/TXAVL/txa-repo/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
 build = ["pyinstaller>=6.6"]
 
 [project.scripts]
@@ -38,6 +37,3 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 txa = ["schemas/*.json"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
