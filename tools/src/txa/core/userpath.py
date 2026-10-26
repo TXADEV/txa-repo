@@ -6,13 +6,14 @@ they can be tested on any system.
 """
 from __future__ import annotations
 
-import os
+import ntpath
 import sys
 from pathlib import Path
 
 
 def _key(path: str) -> str:
-    return os.path.normcase(os.path.normpath(os.path.expandvars(path.strip().strip('"')))).rstrip("\\/")
+    """Comparison key with Windows rules (case-insensitive, \\ separators, %VAR% expanded) on any host OS."""
+    return ntpath.normcase(ntpath.normpath(ntpath.expandvars(path.strip().strip('"')))).rstrip("\\/")
 
 
 def split(value: str) -> list[str]:
@@ -41,7 +42,7 @@ def remove_under(value: str, root: str | Path) -> str:
     kept = []
     for part in split(value):
         k = _key(part)
-        if k == base or k.startswith(base + os.sep):
+        if k == base or k.startswith(base + "\\"):
             continue
         kept.append(part)
     return ";".join(kept)
