@@ -1,85 +1,172 @@
-# txa-repo
+# TXA
 
-Kho gói phần mềm Windows của TXA — **một repo duy nhất** chứa manifest, bot kiểm định 16 bước,
-công cụ `txapm` / `txacreate` và script cài đặt.
+Cài phần mềm Windows bằng một dòng lệnh. TXA tải bộ cài từ trang chính thức của nhà phát hành,
+kiểm tra chữ ký số và mã SHA-256, rồi cài **im lặng**, không phải bấm Next.
 
-```
-txa-repo/
-├── manifests/t/TXAVL/<AppName>/<X.Y.Z>/   các release (core / build / about card)
-├── examples/manifests/…                   card mẫu có chú thích
-├── policy.txa.yaml                        giới hạn & chính sách (đọc từ commit base của PR)
-├── install.ps1                            cài txapm + txacreate vào máy, thêm PATH
-├── scripts/setup-github.ps1               gh CLI: nhãn, CODEOWNERS, branch protection, Pages
-├── tools/                                 package Python `txa` (txapm, txacreate, txaci) + tests
-└── .github/
-    ├── CODEOWNERS                         moderator duyệt manifests/, admin duyệt phần còn lại
-    └── workflows/
-        ├── txa-validate.yml               STEP 01-14 (token chỉ đọc, tools lấy từ commit base)
-        ├── txa-gate.yml                   STEP 15-16 (nhãn, status txa/verified, auto-merge squash)
-        ├── txa-publish-api.yml            REST API tĩnh txa.v1 lên GitHub Pages
-        ├── txa-tools-ci.yml               pytest cho tools/
-        └── txa-release.yml                tag vX.Y.Z → txapm.exe / txacreate.exe (x64, arm64)
+```powershell
+txapm install TXAVL.HelloTool
 ```
 
-## Người dùng — `txapm`
+[![PyPI](https://img.shields.io/pypi/v/txa)](https://pypi.org/project/txa/)
+[![Release](https://img.shields.io/github/v/release/TXAVL/txa-repo)](https://github.com/TXAVL/txa-repo/releases)
+
+---
+
+## Cài đặt
+
+Yêu cầu: Windows 10 (1809) trở lên, x64 hoặc ARM64.
+
+### Cách 1 — PowerShell (không cần Python)
+
+Mở PowerShell (không cần quyền admin) và chạy:
 
 ```powershell
 irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1 | iex
 ```
 
-| Lệnh | Việc |
-|---|---|
-| `txapm install <id\|alias> [--version] [--arch] [--progress\|--interactive]` | tải về `%TEMP%\txa`, kiểm SHA-256, cài ẩn (tự xin UAC khi `scope: machine`) |
-| `txapm upgrade [<id>] [--all]` | liệt kê / nâng cấp gói có bản mới |
-| `txapm uninstall <id> [--interactive]` | gỡ ẩn (msiexec /x, QuietUninstallString, hoặc cờ theo engine) |
-| `txapm list [--upgrade-available]` | gói đã cài kèm cột bản mới |
-| `txapm show <id> [--versions]` · `txapm search <text>` | xem chi tiết / tìm kiếm |
-| `txapm export <file>` · `txapm import <file> [--exact-versions]` | sao lưu và cài lại cả bộ gói |
+Script tải bản mới nhất, kiểm tra SHA-256, cài vào `%LOCALAPPDATA%\TXA` và tự thêm vào PATH.
+Mở cửa sổ terminal mới là dùng được.
 
-Alias: `add`, `update`, `remove`/`rm`, `ls`, `view`, `find`.
+### Cách 2 — pipx (nếu đã có Python 3.10+)
 
-## Người đóng gói — `txacreate`
-
-| Lệnh | Việc |
-|---|---|
-| `txacreate login` / `login --with-token` | GitHub Device Code Flow hoặc PAT (lưu mã hoá DPAPI) |
-| `txacreate new <url> [<url-arch-khác>…]` | tải, băm, phân tích PE/MSI, viết 3 card, chạy 14 bước cục bộ, fork → branch `TXAVL.<App>-<Ver>` → commit → PR |
-| `txacreate update <id> <url>…` | bản mới của gói đã có, giữ nguyên metadata cũ |
-| `txacreate hash <file\|url>` | SHA-256, kích thước, engine, kiến trúc |
-| `txacreate validate <thư-mục>` | chạy 14 bước của bot trên máy |
-| `--dry-run` | chỉ sinh card vào `./txa-out`, không gọi GitHub |
-
-## Định dạng manifest TXA v1
-
-| File | Nội dung |
-|---|---|
-| `core.txa.yaml` | `package.id` (`Namespace.AppName`), `package.version` (X.Y.Z), `channel`, `alias`, `locale.default`, `tags` |
-| `build.txa.yaml` | `ref: <id>@<version>`, `platform.min_build`, `scope`, `targets[]`: `arch`, `engine` (inno/nsis/msi/wix/exe), `source{url, sha256, size, mirrors}`, `switches{silent, progress, custom}`, `success_codes` |
-| `about.<lang>.txa.yaml` | `ref`, `lang`, `name`, `publisher`, `author`, `summary`, `description`, `homepage`, `license{name, url}` |
-
-Mẫu: [examples/manifests/t/TXAVL/HelloTool/1.4.2](examples/manifests/t/TXAVL/HelloTool/1.4.2/build.txa.yaml).
-
-## Bot kiểm định 16 bước
-
-01 Encoding & BOM · 02 YAML strict & thụt lề · 03 Namespace/ID/đường dẫn · 04 SemVer & upgrade path ·
-05 Localization & License · 06 HTTPS & redirect loop (chặn IP nội bộ) · 07 Dung lượng & header server ·
-08 CDN 6 vùng (DoH + EDNS Client Subnet) & mirror · 09 Tải stream, resume, toàn vẹn · 10 Authenticode ·
-11 SHA-256 hai lượt · 12 Kiến trúc PE & engine · 13 Windows tối thiểu · 14 Switch cài ẩn ·
-15 Nhãn `txa:*` + status `txa/verified` · 16 Auto-merge squash, khoá bắt buộc ≥1 code owner duyệt.
-
-PR chạm file ngoài `manifests/` (kể cả `tools/`) bị gắn `txa:infra-change`, không bao giờ auto-merge.
-
-## Triển khai
-
-```bash
-pwsh ./scripts/setup-github.ps1 -Owner TXAVL -Moderators alice,bob -Admins carol
+```powershell
+pipx install txa
 ```
 
-Sau đó: tạo OAuth App bật **Device Flow** rồi `gh variable set TXA_GITHUB_CLIENT_ID --repo TXAVL/txa-repo --body <id>`;
-(tuỳ chọn) `gh secret set TXA_BOT_TOKEN --repo TXAVL/txa-repo`; phát hành công cụ bằng `git tag v1.0.0` + `git push origin v1.0.0`.
+Chưa có pipx thì chạy `python -m pip install --user pipx` rồi `python -m pipx ensurepath`, sau đó mở terminal mới.
 
-## Phát triển
+Kiểm tra:
 
-```bash
-cd tools && python -m pip install -e ".[dev]" && python -m pytest -q
+```powershell
+txapm --version
 ```
+
+---
+
+## Dùng `txapm`
+
+| Muốn làm gì | Lệnh |
+|---|---|
+| Tìm phần mềm | `txapm search notepad` |
+| Xem thông tin một gói | `txapm show TXAVL.HelloTool` |
+| Xem mọi phiên bản | `txapm show TXAVL.HelloTool --versions` |
+| Cài bản mới nhất | `txapm install TXAVL.HelloTool` |
+| Cài một phiên bản cụ thể | `txapm install TXAVL.HelloTool --version 1.4.2` |
+| Cài nhưng vẫn xem tiến trình | `txapm install TXAVL.HelloTool --progress` |
+| Cài với giao diện gốc của bộ cài | `txapm install TXAVL.HelloTool --interactive` |
+| Chỉ tải về, không cài | `txapm install TXAVL.HelloTool --download-only` |
+| Xem gói đã cài | `txapm list` |
+| Xem gói có bản mới | `txapm list --upgrade-available` |
+| Nâng cấp một gói | `txapm upgrade TXAVL.HelloTool` |
+| Nâng cấp tất cả | `txapm upgrade --all` |
+| Gỡ cài đặt | `txapm uninstall TXAVL.HelloTool` |
+| Sao lưu danh sách gói | `txapm export pkgs.json` |
+| Cài lại cả bộ trên máy mới | `txapm import pkgs.json` |
+
+Gói nào có tên ngắn (alias) thì gõ tên ngắn cũng được, ví dụ `txapm install hellotool`.
+Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls` = list, `find` = search.
+
+### Khi cài, TXA làm gì?
+
+1. Lấy thông tin gói từ kho `txa-repo` (đã được kiểm định 16 bước và có người duyệt).
+2. Chọn đúng bộ cài cho máy bạn (ARM64 → x64 → x86).
+3. Kiểm tra phiên bản Windows tối thiểu.
+4. Tải về `%TEMP%\txa\…` và so mã SHA-256. Sai một byte là **xoá file và dừng**.
+5. Cài im lặng. Gói cài cho toàn máy sẽ hiện hộp thoại UAC xin quyền admin.
+6. Ghi log vào `%LOCALAPPDATA%\TXA\logs`.
+
+---
+
+## Đóng góp một phần mềm vào kho — `txacreate`
+
+Ai có tài khoản GitHub cũng gửi được, không cần biết viết YAML.
+
+**1. Đăng nhập GitHub** (một lần):
+
+```powershell
+txacreate login
+```
+
+Trình duyệt sẽ mở `github.com/login/device`. Nhập mã 8 ký tự hiện trong terminal rồi bấm **Authorize**.
+Token được mã hoá và lưu trên máy bạn, không gửi đi đâu khác.
+
+**2. Gửi bộ cài** (link tải `.exe`/`.msi` chính thức, phải là HTTPS):
+
+```powershell
+txacreate new https://vendor.example/app-2.1.0-x64.exe
+```
+
+TXA tự tải file, đọc tên phần mềm, phiên bản, nhà phát hành và loại bộ cài, hỏi thêm vài thông tin
+còn thiếu (mô tả ngắn, giấy phép), tự chạy thử 14 bước kiểm tra, rồi **tự mở Pull Request** cho bạn.
+
+Có bản cho nhiều kiến trúc thì đưa nhiều link: `txacreate new <link-x64> <link-arm64>`.
+
+**3. Phần mềm đã có trong kho, giờ có bản mới:**
+
+```powershell
+txacreate update TXAVL.HelloTool https://vendor.example/app-2.2.0-x64.exe
+```
+
+Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
+
+**Lệnh tiện ích:**
+
+| Lệnh | Việc |
+|---|---|
+| `txacreate new <link> --dry-run` | chỉ tạo file vào `./txa-out` để xem trước, không gửi gì |
+| `txacreate hash setup.exe` | xem SHA-256, kiến trúc, loại bộ cài của một file |
+| `txacreate validate <thư-mục>` | tự kiểm tra một gói viết tay |
+| `txacreate whoami` / `txacreate logout` | xem / xoá tài khoản đang đăng nhập |
+
+### Sau khi gửi Pull Request
+
+Bot TXA kiểm tra tự động **16 bước**: mã hoá file, cú pháp, tên gói, phiên bản, giấy phép, HTTPS,
+dung lượng, CDN ở 6 khu vực, tải về, chữ ký số, SHA-256, kiến trúc, phiên bản Windows, tham số cài im lặng.
+Kết quả hiện ngay trong PR.
+
+| Nhãn bot gắn | Nghĩa |
+|---|---|
+| `txa:verified-build` | qua hết kiểm tra tự động |
+| `txa:awaiting-review` | đang chờ moderator duyệt |
+| `txa:fix-required` | có lỗi — đọc comment của bot, sửa rồi push lại, bot tự chạy lại |
+| `txa:new-app` / `txa:new-version` | gói mới / phiên bản mới |
+
+Moderator duyệt xong, PR tự gộp, vài phút sau mọi người cài được bằng `txapm install`.
+
+---
+
+## Câu hỏi thường gặp
+
+**Gõ `txapm` báo "not recognized"?** Mở cửa sổ terminal mới để PATH được nạp lại.
+
+**Cài báo "SHA-256 mismatch"?** File trên máy chủ nhà phát hành đã thay đổi so với lúc duyệt.
+TXA đã xoá file đó để bảo vệ bạn. Hãy báo lỗi ở [Issues](https://github.com/TXAVL/txa-repo/issues).
+
+**Cài báo mã thoát 1618?** Windows đang cài một phần mềm khác, đợi xong rồi chạy lại.
+
+**Cài báo mã thoát 3010?** Cài thành công, chỉ cần khởi động lại máy.
+
+**Gỡ TXA khỏi máy?**
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1))) -Uninstall
+```
+
+Cài bằng pipx thì gỡ bằng `pipx uninstall txa`.
+
+---
+
+<details>
+<summary>Dành cho người phát triển / quản trị kho</summary>
+
+- `manifests/t/TXAVL/<AppName>/<X.Y.Z>/` — mỗi phiên bản gồm `core.txa.yaml`, `build.txa.yaml`,
+  `about.<lang>.txa.yaml` (mẫu có chú thích: [examples](examples/manifests/t/TXAVL/HelloTool/1.4.2/build.txa.yaml)).
+- `tools/` — mã nguồn Python của `txapm`, `txacreate`, `txaci`
+  (`cd tools && python -m pip install -e ".[dev]" && python -m pytest -q`).
+- `.github/workflows/` — bot kiểm định (`txa-validate`, `txa-gate`), API (`txa-publish-api`),
+  phát hành (`txa-release`, `txa-pypi` — chạy khi push tag `vX.Y.Z`).
+- `policy.txa.yaml` — giới hạn dung lượng, namespace, vùng kiểm tra CDN.
+- `scripts/setup-github.ps1` — cấu hình nhãn, CODEOWNERS, branch protection.
+- API công khai: `https://txavl.github.io/txa-repo/api/txa/v1/index.json`.
+
+</details>
