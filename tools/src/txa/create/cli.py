@@ -1,13 +1,13 @@
 """txacreate - publish installers to txa-repo through a pull request.
 
-    txacreate login                        GitHub Device Code Flow (browser + one-time code)
-    txacreate login --with-token < pat.txt Personal Access Token from stdin
-    txacreate new <url> [<url> ...]        analyse, write cards, pre-flight, fork, branch, commit, PR
+    txacreate new <url> [<url> ...]        analyse, write cards, pre-flight, then fork + branch + commit + PR
+                                           (GitHub access is requested only at the fork step)
     txacreate new <url> --dry-run          only write the cards to ./txa-out
     txacreate update <id> <url> [...]      new version of an existing package, metadata carried over
     txacreate hash <file|url>              SHA-256 + engine + architecture of an installer
     txacreate submit <folder>              PR for a hand-written release folder
     txacreate show <id>                    print the published cards of a package
+    txacreate token [--store [-t PAT]] [--clear]   optional: pre-authorize, or forget, GitHub access
 """
 from __future__ import annotations
 
@@ -37,31 +37,58 @@ def _die(message: str) -> int:
 # --------------------------------------------------------------------------- auth
 
 
-def cmd_login(args) -> int:
-    if args.token or args.with_token:
-        token = (args.token or sys.stdin.read()).strip()
-        source = "personal access token"
-    else:
-        def show(code: dict) -> None:
-            print(f"\n  1. Open   {code['verification_uri']}")
-            print(f"  2. Enter  {code['user_code']}\n")
-            if not args.no_browser:
-                webbrowser.open(code["verification_uri"])
-            print("  Waiting for you to authorize TXA in the browser…")
-        token = device_flow(config.get("client_id"), args.scope, show)
-        source = "device flow"
+SCOPES = "public_repo user:email"
+
+
+def _verified(token: str) -> tuple[GitHub, dict, str | None]:
+    """Check a token against GitHub -> (client, user, email). Warns when it cannot open PRs."""
     gh = GitHub(token)
     response = gh.request("GET", "user")
     user = response.json()
-    login = user["login"]
     scopes = response.headers.get("X-OAuth-Scopes")
-    if scopes is not None and not {"repo", "public_repo"} & {s.strip() for s in scopes.split(",")}:
-        print("  ! token has no repo/public_repo scope - forking and opening PRs will fail")
-    email = _primary_email(gh, user)
-    path = credentials.save_token(token, login, source, email)
-    print(f"✓ logged in as {login} <{email or 'email hidden'}> via {source}")
-    print(f"  credential saved to {path} (encrypted for this Windows account)")
-    return 0
+    if scopes is not None and not {"repo", "public_repo"} & {x.strip() for x in scopes.split(",")}:
+        print("  ! this token has no repo/public_repo scope - forking and opening PRs will fail")
+    return gh, user, _primary_email(gh, user)
+
+
+def _device_login(reason: str) -> tuple[str, str]:
+    """GitHub Device Code Flow: show a one-time code, open the browser, wait for approval."""
+    def show(code: dict) -> None:
+        print(f"\n{reason}")
+        print(f"  1. Open   {code['verification_uri']}")
+        print(f"  2. Enter  {code['user_code']}\n")
+        webbrowser.open(code["verification_uri"])
+        print("  Waiting for you to authorize TXA in the browser…")
+
+    return device_flow(config.get("client_id"), SCOPES, show), "device flow"
+
+
+def _sign_in(token_arg: str | None = None) -> tuple[GitHub, str]:
+    """Credentials for the fork step. Order: --token, TXA_TOKEN, stored login, GH_TOKEN, then the browser.
+
+    Only a device-flow login is stored; a token passed explicitly is used once and never saved.
+    """
+    token, source = (token_arg, "--token") if token_arg else credentials.load_token()
+    saved = False
+    if not token:
+        token, source = _device_login("GitHub access is needed to fork the repository and open the pull request:")
+        saved = True
+    try:
+        gh, user, email = _verified(token)
+    except GitHubError as exc:
+        if exc.status != 401 or saved or not source.startswith("stored credential"):
+            raise
+        print("  the stored GitHub login has expired - signing in again")
+        credentials.clear_token()
+        token, source = _device_login("Authorize TXA again:")
+        saved = True
+        gh, user, email = _verified(token)
+    if saved:
+        path = credentials.save_token(token, user["login"], "device flow", email)
+        print(f"✓ signed in as {user['login']} <{email or 'email hidden'}> (kept encrypted in {path})")
+    else:
+        print(f"→ using GitHub account {user['login']} ({source})")
+    return gh, user["login"]
 
 
 def _primary_email(gh: GitHub, user: dict) -> str | None:
@@ -76,22 +103,28 @@ def _primary_email(gh: GitHub, user: dict) -> str | None:
     return (primary or next(iter(emails), {})).get("email")
 
 
-def cmd_logout(_args) -> int:
-    print("✓ credential removed" if credentials.clear_token() else "no stored credential")
-    return 0
-
-
-def cmd_whoami(_args) -> int:
+def cmd_token(args) -> int:
+    """Optional helper: authorize ahead of time, show the stored login, or forget it."""
+    if args.clear:
+        print("✓ stored GitHub login removed" if credentials.clear_token() else "no stored GitHub login")
+        return 0
+    if args.store:
+        if args.token:
+            token, source = args.token.strip(), "personal access token"
+        else:
+            token, source = _device_login("Authorize TXA on GitHub:")
+        _, user, email = _verified(token)
+        path = credentials.save_token(token, user["login"], source, email)
+        print(f"✓ stored login for {user['login']} <{email or 'email hidden'}> via {source}")
+        print(f"  {path} (encrypted for this Windows account)")
+        return 0
     token, source = credentials.load_token()
     if not token:
-        return _die("not logged in - run `txacreate login`")
-    gh = GitHub(token)
-    user = gh.get("user")
-    record = credentials.stored() or {}
-    email = record.get("email") if record.get("login") == user["login"] else None
-    email = email or _primary_email(gh, user)
+        print("not signed in - this is fine: txacreate asks for GitHub access only when it opens a pull request")
+        return 0
+    _, user, email = _verified(token)
     print(f"user      {user['login']}")
-    print(f"email     {email or '(hidden - run `txacreate login` again to grant user:email)'}")
+    print(f"email     {email or '(hidden)'}")
     print(f"token     {source}")
     print(f"upstream  {config.get('upstream')}")
     return 0
@@ -142,15 +175,8 @@ def cmd_new(args) -> int:
     upstream = config.get("upstream")
     namespace = config.get("namespace")
     interactive = sys.stdin.isatty() and not args.yes
-    gh = login = None
-    token = None
     if not args.dry_run:
-        token, source = credentials.load_token()
-        if not token:
-            return _die("not logged in - run `txacreate login` (or set TXA_TOKEN)")
-        gh = GitHub(token)
-        login = gh.get("user")["login"]
-        print(f"→ authenticated as {login} ({source}), upstream {upstream}")
+        print(f"→ target repository {upstream}")
 
     # 1. download + analyse every installer
     work = Path(tempfile.mkdtemp(prefix="create-", dir=config.temp_root()))
@@ -191,7 +217,7 @@ def cmd_new(args) -> int:
     try:
         from txa.pm.source import Source
 
-        src = Source(token=token or "")
+        src = Source()
         latest, previous = src.release(package_id)
         published = src.versions(package_id)
         print(f"→ {package_id} already published (latest {latest}) - reusing its metadata")
@@ -293,7 +319,11 @@ def cmd_new(args) -> int:
         print("✓ dry run complete - nothing was sent to GitHub")
         return 0
 
-    # 6. fork → branch → commit → PR
+    # 6. fork → branch → commit → PR  (the first step that needs GitHub access)
+    try:
+        gh, login = _sign_in(args.token)
+    except GitHubError as exc:
+        return _die(f"{exc}\n  (or pass --token <PAT> / set TXA_TOKEN)")
     existing_pr = None if args.force else _safe(lambda: _find_pr(gh, upstream, draft))
     if existing_pr:
         return _die(f"an open pull request already covers {package_id} {draft.version}: {existing_pr}")
@@ -395,11 +425,10 @@ def cmd_submit(args) -> int:
         print(render_console(report))
         if report["verdict"] == "fail" and not args.force:
             return _die("validation failed - fix the issues above or pass --force")
-    token, source = credentials.load_token()
-    if not token:
-        return _die("not logged in - run `txacreate login`")
-    gh = GitHub(token)
-    login = gh.get("user")["login"]
+    try:
+        gh, login = _sign_in(args.token)
+    except GitHubError as exc:
+        return _die(f"{exc}\n  (or pass --token <PAT> / set TXA_TOKEN)")
     upstream = config.get("upstream")
     if not args.force:
         existing = find_open_pr(gh, upstream, package_id, version)
@@ -408,7 +437,7 @@ def cmd_submit(args) -> int:
     try:
         from txa.pm.source import Source
 
-        published = Source(token=token).versions(package_id)
+        published = Source().versions(package_id)
     except Exception:
         published = []
     kind = "New version" if published else "New package"
@@ -475,24 +504,21 @@ def _release_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="open the PR even if pre-flight fails or a PR exists")
     p.add_argument("-y", "--yes", action="store_true", help="never prompt; fail on missing fields")
+    p.add_argument("-t", "--token", help="GitHub personal access token for this run (default: browser sign-in when needed)")
 
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
     parser = argparse.ArgumentParser(prog="txacreate", description="Publish installers to the TXA repository",
-        epilog='examples:\n  txacreate login\n  txacreate new https://vendor.example/app-1.2.3-x64.exe\n  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n  txacreate hash setup.exe', formatter_class=argparse.RawDescriptionHelpFormatter)
+        epilog='examples:\n  txacreate new https://vendor.example/app-1.2.3-x64.exe\n  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n  txacreate hash setup.exe', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txacreate {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    p = sub.add_parser("login", help="authenticate with GitHub (Device Code Flow or PAT)")
-    p.add_argument("--token", help="personal access token (prefer --with-token: flags end up in shell history)")
-    p.add_argument("--with-token", action="store_true", help="read a personal access token from stdin")
-    p.add_argument("--scope", default="public_repo user:email", help="OAuth scopes for the device flow")
-    p.add_argument("--no-browser", action="store_true", help="do not open the verification page automatically")
-    p.set_defaults(func=cmd_login)
-
-    sub.add_parser("logout", help="delete the stored credential").set_defaults(func=cmd_logout)
-    sub.add_parser("whoami", help="show the authenticated GitHub user").set_defaults(func=cmd_whoami)
+    p = sub.add_parser("token", help="optional: sign in to GitHub ahead of time, show or forget the stored login")
+    p.add_argument("--store", action="store_true", help="authorize now (browser) and keep the login")
+    p.add_argument("--clear", action="store_true", help="forget the stored login")
+    p.add_argument("-t", "--token", help="with --store: keep this personal access token instead of using the browser")
+    p.set_defaults(func=cmd_token)
 
     p = sub.add_parser("config", help="read or change settings (upstream, client_id, namespace, api)")
     p.add_argument("action", choices=["list", "get", "set", "unset"])
@@ -518,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-validate", action="store_true")
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="submit even if validation fails or a PR exists")
+    p.add_argument("-t", "--token", help="GitHub personal access token for this run")
     p.set_defaults(func=cmd_submit)
 
     p = sub.add_parser("show", help="print the published cards of a package")

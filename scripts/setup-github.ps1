@@ -239,7 +239,7 @@ Write-Host '   required: status txa/verified + 1 code-owner approval; squash aut
 # ---------------------------------------------------------------------------- next steps
 Write-Step 'Done. Remaining manual steps'
 Write-Host @"
-  1. Device Code Flow for 'txacreate login':
+  1. Device Code Flow for the browser sign-in txacreate shows at the fork step:
        GitHub > Settings > Developer settings > OAuth Apps > New OAuth App
        tick 'Enable Device Flow', copy the Client ID, then:
        gh variable set TXA_GITHUB_CLIENT_ID --repo $Manifest --body <client-id>

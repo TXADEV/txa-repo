@@ -128,23 +128,25 @@ chạy `scripts/setup-github.ps1 -Owner <tổ-chức>`.
 
 Ai có tài khoản GitHub cũng gửi được, không cần biết viết YAML.
 
-**1. Đăng nhập GitHub** (một lần):
-
-```powershell
-txacreate login
-```
-
-Trình duyệt sẽ mở `github.com/login/device`. Nhập mã 8 ký tự hiện trong terminal rồi bấm **Authorize**.
-Token được mã hoá và lưu trên máy bạn, không gửi đi đâu khác.
-
-**2. Gửi bộ cài** (link tải `.exe`/`.msi` chính thức, phải là HTTPS):
+**1. Gửi bộ cài** (link tải `.exe`/`.msi` chính thức, phải là HTTPS) — không cần đăng nhập trước:
 
 ```powershell
 txacreate new https://vendor.example/app-2.1.0-x64.exe
 ```
 
 TXA tự tải file, đọc tên phần mềm, phiên bản, nhà phát hành và loại bộ cài, hỏi thêm vài thông tin
-còn thiếu (mô tả ngắn, giấy phép), tự chạy thử 14 bước kiểm tra, rồi **tự mở Pull Request** cho bạn.
+còn thiếu (mô tả ngắn, giấy phép) và chạy thử 14 bước kiểm tra.
+
+**2. Cấp quyền GitHub — chỉ ở bước cuối.** Khi sắp fork kho và mở Pull Request, TXA mới hiện:
+
+```
+GitHub access is needed to fork the repository and open the pull request:
+  1. Open   https://github.com/login/device
+  2. Enter  XXXX-XXXX
+```
+
+Trình duyệt tự mở, bạn nhập mã 8 ký tự rồi bấm **Authorize**. Lệnh chờ bạn duyệt xong rồi tự fork, tạo
+branch, commit và **mở Pull Request**. Quyền được mã hoá và nhớ trên máy, lần sau không hỏi lại.
 
 Có bản cho nhiều kiến trúc thì đưa nhiều link: `txacreate new <link-x64> <link-arm64>`.
 
@@ -165,7 +167,10 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 | `txacreate submit <thư-mục>` | gửi PR cho một gói tự viết tay (đã có 3 file YAML) |
 | `txacreate show TXAVL.HelloTool` | in nội dung manifest đang có trong kho |
 | `txacreate validate <thư-mục>` | tự kiểm tra một gói viết tay |
-| `txacreate whoami` / `txacreate logout` | xem tài khoản + email đang đăng nhập / đăng xuất |
+| `txacreate token` | xem tài khoản GitHub đang dùng (không bắt buộc) |
+| `txacreate token --store` | cấp quyền GitHub trước, không đợi tới lúc gửi |
+| `txacreate token --clear` | quên quyền đã lưu (đăng xuất) |
+| `txacreate new <link> -t <PAT>` | dùng Personal Access Token cho lần này, không lưu (hoặc đặt biến `TXA_TOKEN`) |
 
 ### Sau khi gửi Pull Request
 

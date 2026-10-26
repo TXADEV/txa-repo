@@ -17,7 +17,7 @@
         bin\      txapm.exe, txacreate.exe   (added to the user PATH)
         logs\     installer logs written by txapm
         state\    installed.json
-        config.json, credentials.bin (DPAPI-encrypted, created by `txacreate login`)
+        config.json, credentials.bin (DPAPI-encrypted, created when txacreate first opens a PR)
 #>
 [CmdletBinding()]
 param(
@@ -203,13 +203,13 @@ Write-Row 'txapm install <id> -s corp'                  'use one source only'
 Write-Row 'txapm source disable|enable|remove <name>'   'switch off, on, or delete a source'
 
 Write-Heading 'txacreate - publish software to the TXA repository'
-Write-Row 'txacreate login'                            'sign in with GitHub (device code)'
-Write-Row 'txacreate new <https-installer-url>'        'analyse, validate, fork and open a PR'
+Write-Row 'txacreate new <https-installer-url>'        'analyse + validate, then fork and open a PR'
 Write-Row 'txacreate update TXAVL.HelloTool <url>'     'new version of an existing package'
 Write-Row 'txacreate new <url> --dry-run'              'preview the YAML only, send nothing'
 Write-Row 'txacreate hash setup.exe'                   'SHA-256, engine and architecture'
 Write-Row 'txacreate validate <folder>'                'run the bot checks locally'
-Write-Row 'txacreate whoami'                           'GitHub account in use'
+Write-Row 'txacreate token [--store|--clear]'          'optional: show, pre-authorize or forget GitHub login'
+Write-Host '  (no login needed up front: GitHub access is asked only at the fork step)' -ForegroundColor DarkGray
 
 Write-Heading 'Examples'
 Write-Host '  txapm search editor'

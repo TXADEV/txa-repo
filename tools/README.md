@@ -17,7 +17,7 @@ txapm uninstall TXAVL.HelloTool
 | Command | Purpose |
 |---|---|
 | `txapm` | search, install, upgrade, uninstall, list, export/import packages |
-| `txacreate` | sign in with GitHub and submit installers to the repository (`login`, `new`, `update`, `hash`) |
+| `txacreate` | submit installers to the repository as pull requests (`new`, `update`, `submit`, `hash`); GitHub access is requested only when the pull request is opened |
 | `txaci` | the 16-step package validator used by the repository bot |
 
 Requires Windows 10 1809 or newer. Full guide (Vietnamese): https://github.com/TXAVL/txa-repo
