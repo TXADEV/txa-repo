@@ -4,11 +4,15 @@
     txapm upgrade [<id>] [--all]       txapm uninstall <id>
     txapm list [--upgrade-available]   txapm show <id>      txapm search <text>
     txapm export <file>                txapm import <file>
+    txapm pin add|remove|list [<id>]   txapm download <id> [-d dir]
+    txapm list --all                   txapm source [set <url>|reset|update]
+    txapm --info                       txapm hash <file|url>     txapm validate <folder>
 """
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,12 +95,18 @@ def cmd_upgrade(args) -> int:
         package_id = src.resolve(args.package)
         if package_id not in records:
             return _die(f"{package_id} was not installed with txapm - use `txapm install`")
+        if package_id in installer.pins() and not args.include_pinned:
+            return _die(f"{package_id} is pinned - use --include-pinned or `txapm pin remove {package_id}`")
         todo = {package_id: _available(src, {package_id: records[package_id]}).get(package_id)}
         if not todo[package_id]:
             print(f"✓ {package_id} {records[package_id]['version']} is up to date")
             return 0
     else:
         todo = _available(src, records)
+        pinned = installer.pins()
+        for package_id in sorted(k for k in list(todo) if k in pinned and not args.include_pinned):
+            todo.pop(package_id)
+            print(f"  {package_id:<40} pinned at {pinned[package_id]} - skipped (txapm pin remove to release)")
         if not todo:
             print("✓ everything is up to date")
             return 0
@@ -142,6 +152,8 @@ def cmd_uninstall(args) -> int:
 
 
 def cmd_list(args) -> int:
+    if args.all:
+        return _list_machine(args)
     records = installer.installed()
     if not records:
         print("nothing installed through txapm yet")
@@ -153,10 +165,127 @@ def cmd_list(args) -> int:
     rows = sorted(records.items())
     if args.upgrade_available:
         rows = [r for r in rows if r[0] in available]
-    print(f"{'Id':<40} {'Version':<10} {'Available':<10} Arch")
+    pinned = installer.pins()
+    print(f"{'Id':<40} {'Version':<10} {'Available':<10} {'Arch':<6} Pin")
     for package_id, info in rows:
-        print(f"{package_id:<40} {info['version']:<10} {available.get(package_id, ''):<10} {info['arch']}")
+        print(f"{package_id:<40} {info['version']:<10} {available.get(package_id, ''):<10} {info['arch']:<6} "
+              f"{pinned.get(package_id, '')}")
     return 0
+
+
+def _list_machine(args) -> int:
+    """Every program Windows knows about; those also in TXA get an Id, Available and Source."""
+    try:
+        index = {p["name"].lower(): p for p in Source().index().get("packages", [])}
+    except Exception:  # offline: still list the machine
+        index = {}
+    rows = []
+    for program in sorted(uninstall.installed_programs(), key=lambda p: p.name.lower()):
+        if not program.name:
+            continue
+        lowered = program.name.lower()
+        entry = index.get(lowered) or next((e for n, e in index.items() if lowered.startswith(n + " ")), None)
+        version = program.version or ""
+        newest = ""
+        if entry:
+            current = semver.coerce(version) or version
+            if semver.is_valid(current) and semver.parse(entry["latest"]) > semver.parse(current):
+                newest = entry["latest"]
+        if args.upgrade_available and not newest:
+            continue
+        rows.append((program.name[:38], entry["id"] if entry else "", version[:14], newest, "txa" if entry else ""))
+    print(f"{'Name':<38} {'Id':<32} {'Version':<14} {'Available':<10} Source")
+    for name, package_id, version, newest, source in rows:
+        print(f"{name:<38} {package_id:<32} {version:<14} {newest:<10} {source}")
+    print(f"{len(rows)} program(s)")
+    return 0
+
+
+def cmd_pin(args) -> int:
+    pinned = installer.pins()
+    if args.action == "list":
+        if not pinned:
+            print("no pins")
+        for package_id, version in sorted(pinned.items()):
+            print(f"{package_id:<40} {version}")
+        return 0
+    if not args.package:
+        return _die(f"pin {args.action} needs a package id")
+    package_id = Source().resolve(args.package)
+    if args.action == "remove":
+        installer.set_pin(package_id, None)
+        print(f"✓ {package_id} unpinned")
+        return 0
+    version = args.version or (installer.installed().get(package_id) or {}).get("version") or "*"
+    installer.set_pin(package_id, version)
+    print(f"✓ {package_id} pinned at {version} - `txapm upgrade --all` will skip it")
+    return 0
+
+
+def cmd_download(args) -> int:
+    src = Source()
+    package_id = src.resolve(args.package)
+    version, cards = src.release(package_id, args.version)
+    target = installer.pick_target(cards["build"], args.arch)
+    payload = installer.fetch(package_id, version, target, console.progress("download"))
+    console.done_line()
+    out = Path(args.dir).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+    dest = out / payload.name
+    shutil.copy2(payload, dest)
+    manifest = out / f"{package_id}-{version}.txa.json"
+    manifest.write_text(json.dumps({"version": version, **cards}, indent=2, ensure_ascii=False), "utf-8")
+    print(f"✓ {dest} (SHA-256 verified)")
+    print(f"✓ {manifest}")
+    return 0
+
+
+def cmd_source(args) -> int:
+    cfg = config.load_config()
+    if args.action == "set":
+        if not args.value:
+            return _die("source set needs an API URL")
+        cfg["api"] = args.value.rstrip("/")
+        config.save_config(cfg)
+    elif args.action == "reset":
+        cfg.pop("api", None)
+        config.save_config(cfg)
+    elif args.action == "update":
+        print(f"✓ index refreshed - {Source().index().get('count', 0)} package(s)")
+        return 0
+    print(f"{'Name':<8} {'Argument':<60} Repository")
+    print(f"{'txa':<8} {config.api_base():<60} {config.get('upstream')}")
+    return 0
+
+
+def cmd_info() -> int:
+    from txa.core import credentials
+
+    record = credentials.stored() or {}
+    current = winos.current()
+    email = f" <{record['email']}>" if record.get("email") else ""
+    print(f"txapm {__version__}")
+    print(f"windows     {winos.fmt(current) if current else '-'} · {winos.native_arch()}")
+    print(f"source      {config.api_base()}")
+    print(f"repository  {config.get('upstream')}")
+    print(f"home        {config.txa_home()}")
+    print(f"downloads   {config.temp_root()}")
+    print(f"logs        {config.txa_home() / 'logs'}")
+    print(f"installed   {len(installer.installed())} package(s), {len(installer.pins())} pin(s)")
+    print(f"github      {record.get('login', '-')}{email}")
+    return 0
+
+
+def cmd_hash(args) -> int:
+    from txa.create.cli import main as create_main
+
+    return create_main(["hash", args.target])
+
+
+def cmd_validate(args) -> int:
+    from txa.ci.cli import main as txaci_main
+
+    return txaci_main(["validate", *args.paths, *(["--offline"] if args.offline else [])])
 
 
 def cmd_show(args) -> int:
@@ -240,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="txapm", description="TXA package manager",
         epilog='examples:\n  txapm search notepad\n  txapm install TXAVL.HelloTool\n  txapm upgrade --all\n  txapm uninstall TXAVL.HelloTool', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txapm {__version__}")
+    parser.add_argument("--info", action="store_true", help="show version, paths, source and account")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     p = sub.add_parser("install", aliases=["add"], help="download, verify and silently install a package")
@@ -252,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("upgrade", aliases=["update"], help="upgrade one package, or list/apply all upgrades")
     p.add_argument("package", nargs="?")
     p.add_argument("--all", action="store_true", help="upgrade every package with a newer version")
+    p.add_argument("--include-pinned", action="store_true", help="also upgrade pinned packages")
     _install_options(p)
     p.set_defaults(func=cmd_upgrade)
 
@@ -261,8 +392,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all-matches", action="store_true", help="remove every program matching the name")
     p.set_defaults(func=cmd_uninstall)
 
-    p = sub.add_parser("list", aliases=["ls"], help="packages installed through txapm")
+    p = sub.add_parser("list", aliases=["ls"], help="packages installed through txapm (--all: every program)")
     p.add_argument("--upgrade-available", action="store_true", help="only packages with a newer version")
+    p.add_argument("--all", action="store_true", help="every installed program on this PC, matched against TXA")
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("show", aliases=["view"], help="show package details")
@@ -285,7 +417,36 @@ def main(argv: list[str] | None = None) -> int:
     _install_options(p)
     p.set_defaults(func=cmd_import, download_only=False)
 
+    p = sub.add_parser("pin", help="hold a package at its version so upgrade --all skips it")
+    p.add_argument("action", choices=["add", "remove", "list"])
+    p.add_argument("package", nargs="?")
+    p.add_argument("--version", dest="version", help="pin to this version (default: installed version)")
+    p.set_defaults(func=cmd_pin)
+
+    p = sub.add_parser("download", help="download and verify an installer plus its manifest into a folder")
+    p.add_argument("package")
+    p.add_argument("--version", dest="version")
+    p.add_argument("--arch", choices=["x64", "x86", "arm64"])
+    p.add_argument("-d", "--dir", default=str(Path.home() / "Downloads"), help="target folder (default Downloads)")
+    p.set_defaults(func=cmd_download)
+
+    p = sub.add_parser("source", help="show or change the package source (API)")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "set", "reset", "update"])
+    p.add_argument("value", nargs="?")
+    p.set_defaults(func=cmd_source)
+
+    p = sub.add_parser("hash", help="SHA-256, engine and architecture of an installer file or URL")
+    p.add_argument("target")
+    p.set_defaults(func=cmd_hash)
+
+    p = sub.add_parser("validate", help="run the repository bot checks on a local manifest folder")
+    p.add_argument("paths", nargs="+")
+    p.add_argument("--offline", action="store_true")
+    p.set_defaults(func=cmd_validate)
+
     args = parser.parse_args(argv)
+    if args.info:
+        return cmd_info()
     if args.command is None:
         parser.print_help()
         return 0

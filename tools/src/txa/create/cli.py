@@ -6,6 +6,8 @@
     txacreate new <url> --dry-run          only write the cards to ./txa-out
     txacreate update <id> <url> [...]      new version of an existing package, metadata carried over
     txacreate hash <file|url>              SHA-256 + engine + architecture of an installer
+    txacreate submit <folder>              PR for a hand-written release folder
+    txacreate show <id>                    print the published cards of a package
 """
 from __future__ import annotations
 
@@ -374,6 +376,67 @@ def cmd_hash(args) -> int:
     return 0
 
 
+def cmd_submit(args) -> int:
+    """Open a PR for a hand-written release folder (core + build + about cards)."""
+    from txa.core.manifest import Bundle, kind_of, release_dir
+    from txa.create.submit import find_open_pr, submit
+
+    folder = Path(args.folder)
+    bundle = Bundle.read(folder)
+    if not bundle.package_id or not bundle.version:
+        return _die(f"{folder}: no readable core.txa.yaml")
+    package_id, version = bundle.package_id, bundle.version
+    if not args.no_validate:
+        ctx = init_local([folder], offline=args.offline)
+        print(f"→ validating {package_id} {version} (steps 01-14)…")
+        for number in sorted(steps.REGISTRY):
+            steps.run_step(ctx, number)
+        report = build_report(ctx)
+        print(render_console(report))
+        if report["verdict"] == "fail" and not args.force:
+            return _die("validation failed - fix the issues above or pass --force")
+    token, source = credentials.load_token()
+    if not token:
+        return _die("not logged in - run `txacreate login`")
+    gh = GitHub(token)
+    login = gh.get("user")["login"]
+    upstream = config.get("upstream")
+    if not args.force:
+        existing = find_open_pr(gh, upstream, package_id, version)
+        if existing:
+            return _die(f"an open pull request already covers {package_id} {version}: {existing}")
+    try:
+        from txa.pm.source import Source
+
+        published = Source(token=token).versions(package_id)
+    except Exception:
+        published = []
+    kind = "New version" if published else "New package"
+    target_dir = release_dir(package_id, version)
+    files = {f"{target_dir}/{name}": raw.decode("utf-8") for name, raw in bundle.files.items() if kind_of(name)}
+    body = (f"## 📦 {kind}: `{package_id}` {version}\n\nSubmitted from a local folder with "
+            f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).\n\n<sub>txacreate {__version__}</sub>")
+    result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
+                    direct=args.direct)
+    print(f"\n✓ pull request #{result.number} opened: {result.url}")
+    return 0
+
+
+def cmd_show(args) -> int:
+    from txa.core.manifest import dump_card
+    from txa.pm.source import Source
+
+    src = Source()
+    package_id = src.resolve(args.package)
+    version, cards = src.release(package_id, args.version)
+    documents = [("core.txa.yaml", cards["core"]), ("build.txa.yaml", cards["build"])]
+    documents += [(f"about.{lang}.txa.yaml", card) for lang, card in cards["about"].items()]
+    for name, card in documents:
+        print(f"# ---- {package_id} {version} · {name}")
+        print(dump_card(card))
+    return 0
+
+
 def cmd_validate(args) -> int:
     from txa.ci.cli import main as txaci_main
 
@@ -449,6 +512,19 @@ def main(argv: list[str] | None = None) -> int:
     _release_options(p)
     p.set_defaults(func=cmd_update)
 
+    p = sub.add_parser("submit", help="open a pull request for a hand-written release folder")
+    p.add_argument("folder", help="folder containing core.txa.yaml, build.txa.yaml, about.<lang>.txa.yaml")
+    p.add_argument("--offline", action="store_true", help="skip network checks in the validation")
+    p.add_argument("--no-validate", action="store_true")
+    p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
+    p.add_argument("--force", action="store_true", help="submit even if validation fails or a PR exists")
+    p.set_defaults(func=cmd_submit)
+
+    p = sub.add_parser("show", help="print the published cards of a package")
+    p.add_argument("package")
+    p.add_argument("--version", dest="version")
+    p.set_defaults(func=cmd_show)
+
     p = sub.add_parser("hash", help="SHA-256, engine and architecture of a local file or HTTPS URL")
     p.add_argument("target")
     p.set_defaults(func=cmd_hash)
@@ -468,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("config set needs a value")
     try:
         return args.func(args)
-    except GitHubError as exc:
+    except (GitHubError, net.NetError, LookupError) as exc:  # LookupError covers source.NotFound
         return _die(str(exc))
     except KeyboardInterrupt:
         return _die("cancelled")

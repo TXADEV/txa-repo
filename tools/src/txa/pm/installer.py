@@ -168,6 +168,29 @@ def forget(package_id: str) -> None:
     _save(data)
 
 
+def _pins_path() -> Path:
+    return config.txa_home() / "state" / "pins.json"
+
+
+def pins() -> dict[str, str]:
+    """package id -> pinned version ('*' = never upgrade)."""
+    try:
+        return json.loads(_pins_path().read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_pin(package_id: str, version: str | None) -> None:
+    data = pins()
+    if version is None:
+        data.pop(package_id, None)
+    else:
+        data[package_id] = version
+    path = _pins_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), "utf-8")
+
+
 def _save(data: dict) -> None:
     path = _records_path()
     path.parent.mkdir(parents=True, exist_ok=True)

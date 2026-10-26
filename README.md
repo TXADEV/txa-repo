@@ -62,6 +62,12 @@ txapm --version
 | Gỡ cài đặt | `txapm uninstall TXAVL.HelloTool` |
 | Sao lưu danh sách gói | `txapm export pkgs.json` |
 | Cài lại cả bộ trên máy mới | `txapm import pkgs.json` |
+| Xem **mọi** phần mềm trên máy, đánh dấu cái nào có trong TXA | `txapm list --all` |
+| Giữ nguyên phiên bản, không cho `upgrade --all` đụng vào | `txapm pin add TXAVL.HelloTool` |
+| Bỏ giữ / xem danh sách đang giữ | `txapm pin remove TXAVL.HelloTool` · `txapm pin list` |
+| Tải bộ cài + manifest về thư mục (mặc định Downloads) | `txapm download TXAVL.HelloTool -d D:\setup` |
+| Xem / đổi nguồn gói | `txapm source` · `txapm source set <url>` · `txapm source reset` |
+| Thông tin cài đặt, đường dẫn, tài khoản | `txapm --info` |
 
 Gói nào có tên ngắn (alias) thì gõ tên ngắn cũng được, ví dụ `txapm install hellotool`.
 Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls` = list, `find` = search.
@@ -115,8 +121,10 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 |---|---|
 | `txacreate new <link> --dry-run` | chỉ tạo file vào `./txa-out` để xem trước, không gửi gì |
 | `txacreate hash setup.exe` | xem SHA-256, kiến trúc, loại bộ cài của một file |
+| `txacreate submit <thư-mục>` | gửi PR cho một gói tự viết tay (đã có 3 file YAML) |
+| `txacreate show TXAVL.HelloTool` | in nội dung manifest đang có trong kho |
 | `txacreate validate <thư-mục>` | tự kiểm tra một gói viết tay |
-| `txacreate whoami` / `txacreate logout` | xem / xoá tài khoản đang đăng nhập |
+| `txacreate whoami` / `txacreate logout` | xem tài khoản + email đang đăng nhập / đăng xuất |
 
 ### Sau khi gửi Pull Request
 
