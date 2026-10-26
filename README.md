@@ -72,6 +72,26 @@ txapm --version
 Gói nào có tên ngắn (alias) thì gõ tên ngắn cũng được, ví dụ `txapm install hellotool`.
 Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls` = list, `find` = search.
 
+### Phần mềm có sẵn trong kho
+
+| Gói (`txapm install …`) | Tên ngắn | Phần mềm | Phiên bản |
+|---|---|---|---|
+| `TXAVL.NotepadPlusPlus` | `notepadpp` | Notepad++ — trình soạn thảo mã nguồn | 8.9.8 |
+| `TXAVL.SevenZip` | `7zip` | 7-Zip — nén và giải nén | 26.5.0 |
+| `TXAVL.VLC` | `vlc` | VLC media player | 3.0.24 |
+| `TXAVL.Firefox` | `firefox` | Mozilla Firefox | 158.0.1 |
+| `TXAVL.Git` | `git` | Git cho Windows | 2.56.0 |
+| `TXAVL.Python` | `python` | Python | 3.14.10 |
+| `TXAVL.NodeJS` | `nodejs` | Node.js | 24.22.1 |
+| `TXAVL.OBSStudio` | `obs` | OBS Studio — quay và phát trực tiếp | 33.0.0 |
+| `TXAVL.ShareX` | `sharex` | ShareX — chụp và quay màn hình | 21.0.0 |
+| `TXAVL.Audacity` | `audacity` | Audacity — chỉnh sửa âm thanh | 4.0.1 |
+| `TXAVL.Obsidian` | `obsidian` | Obsidian — ghi chú Markdown | 1.14.5 |
+
+Ví dụ: `txapm install vlc` hoặc `txapm install TXAVL.VLC`. Danh sách đầy đủ và mới nhất: `txapm search "" `
+hoặc xem [trang chỉ mục](https://txavl.github.io/txa-repo/). Mỗi gói chỉ trỏ tới link tải **chính thức** của nhà
+phát hành; TXA không lưu lại bộ cài, và luôn đối chiếu SHA-256 trước khi chạy.
+
 ### Khi cài, TXA làm gì?
 
 1. Lấy thông tin gói từ kho `txa-repo` (đã được kiểm định 16 bước và có người duyệt).

@@ -7,6 +7,7 @@ from txa import __version__
 from txa.ci.context import Context
 from txa.ci.steps import TITLES
 from txa.constants import REPORT_MARKER
+from txa.core import console
 
 ICONS = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌", "SKIP": "⏭️", "PENDING": "⏳"}
 _ORDER = {"fail": 0, "warn": 1, "ok": 2, "info": 3, "skip": 4}
@@ -103,13 +104,20 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
 
 
 def render_console(report: dict) -> str:
+    level_style = {"fail": ("red", "bold"), "warn": ("yellow",), "ok": ("green",), "info": ("cyan",), "skip": ("gray",)}
+    paint = console.paint
     out = []
     for target in report.get("targets", []):
-        out.append(f"\n{target['path']}  [{target['mode']}]")
+        out.append(f"\n{paint(target['path'], 'bold', 'cyan')}  {paint('[' + target['mode'] + ']', 'magenta')}")
         for row in (r for r in report["results"] if r["target"] == target["path"]):
-            out.append(f"  STEP {row['step']:02d} {row['status']:<4}  {TITLES[row['step']]}")
+            number = paint(f"{row['step']:02d}", "bold")
+            out.append(f"  {paint('STEP', 'gray')} {number} {console.status(row['status'])}  {TITLES[row['step']]}")
             for message in sorted(row["messages"], key=lambda m: _ORDER.get(m["level"], 9)):
                 if message["level"] in ("fail", "warn") or row["status"] == "PASS":
-                    out.append(f"           {message['level']:<4}  {message['text']}")
-    out.append(f"\nverdict: {report['verdict'].upper()}")
+                    level, text = message["level"], message["text"]
+                    tag = paint(level.ljust(4), *level_style.get(level, ()))
+                    out.append(f"           {tag}  {paint(text, 'red') if level == 'fail' else text}")
+    verdict = report["verdict"]
+    shade = {"pass": ("green", "bold"), "fail": ("red", "bold")}.get(verdict, ("yellow", "bold"))
+    out.append(f"\nverdict: {paint(verdict.upper(), *shade)}")
     return "\n".join(out)

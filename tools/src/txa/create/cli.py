@@ -30,7 +30,7 @@ MAX_DOWNLOAD = 4 * 1024 * 1024 * 1024
 
 
 def _die(message: str) -> int:
-    print(f"txacreate: {message}", file=sys.stderr)
+    console.error("txacreate", message)
     return 1
 
 
@@ -47,18 +47,18 @@ def _verified(token: str) -> tuple[GitHub, dict, str | None]:
     user = response.json()
     scopes = response.headers.get("X-OAuth-Scopes")
     if scopes is not None and not {"repo", "public_repo"} & {x.strip() for x in scopes.split(",")}:
-        print("  ! this token has no repo/public_repo scope - forking and opening PRs will fail")
+        console.say("  ! this token has no repo/public_repo scope - forking and opening PRs will fail")
     return gh, user, _primary_email(gh, user)
 
 
 def _device_login(reason: str) -> tuple[str, str]:
     """GitHub Device Code Flow: show a one-time code, open the browser, wait for approval."""
     def show(code: dict) -> None:
-        print(f"\n{reason}")
-        print(f"  1. Open   {code['verification_uri']}")
-        print(f"  2. Enter  {code['user_code']}\n")
+        print(f"\n{console.paint(reason, 'bold')}")
+        print(f"  1. Open   {console.paint(code['verification_uri'], 'cyan')}")
+        print(f"  2. Enter  {console.paint(code['user_code'], 'yellow', 'bold')}\n")
         webbrowser.open(code["verification_uri"])
-        print("  Waiting for you to authorize TXA in the browser…")
+        print(console.paint("  Waiting for you to authorize TXA in the browser…", "gray"))
 
     return device_flow(config.get("client_id"), SCOPES, show), "device flow"
 
@@ -78,16 +78,16 @@ def _sign_in(token_arg: str | None = None) -> tuple[GitHub, str]:
     except GitHubError as exc:
         if exc.status != 401 or saved or not source.startswith("stored credential"):
             raise
-        print("  the stored GitHub login has expired - signing in again")
+        console.say("  ! the stored GitHub login has expired - signing in again")
         credentials.clear_token()
         token, source = _device_login("Authorize TXA again:")
         saved = True
         gh, user, email = _verified(token)
     if saved:
         path = credentials.save_token(token, user["login"], "device flow", email)
-        print(f"✓ signed in as {user['login']} <{email or 'email hidden'}> (kept encrypted in {path})")
+        console.say(f"✓ signed in as {user['login']} <{email or 'email hidden'}> (kept encrypted in {path})")
     else:
-        print(f"→ using GitHub account {user['login']} ({source})")
+        console.say(f"→ using GitHub account {user['login']} ({source})")
     return gh, user["login"]
 
 
@@ -106,7 +106,7 @@ def _primary_email(gh: GitHub, user: dict) -> str | None:
 def cmd_token(args) -> int:
     """Optional helper: authorize ahead of time, show the stored login, or forget it."""
     if args.clear:
-        print("✓ stored GitHub login removed" if credentials.clear_token() else "no stored GitHub login")
+        console.say("✓ stored GitHub login removed" if credentials.clear_token() else "no stored GitHub login")
         return 0
     if args.store:
         if args.token:
@@ -115,18 +115,17 @@ def cmd_token(args) -> int:
             token, source = _device_login("Authorize TXA on GitHub:")
         _, user, email = _verified(token)
         path = credentials.save_token(token, user["login"], source, email)
-        print(f"✓ stored login for {user['login']} <{email or 'email hidden'}> via {source}")
-        print(f"  {path} (encrypted for this Windows account)")
+        console.say(f"✓ stored login for {user['login']} <{email or 'email hidden'}> via {source}")
+        print(console.paint(f"  {path} (encrypted for this Windows account)", "gray"))
         return 0
     token, source = credentials.load_token()
     if not token:
-        print("not signed in - this is fine: txacreate asks for GitHub access only when it opens a pull request")
+        console.say("! not signed in - this is fine: txacreate asks for GitHub access only when it opens a pull request")
         return 0
     _, user, email = _verified(token)
-    print(f"user      {user['login']}")
-    print(f"email     {email or '(hidden)'}")
-    print(f"token     {source}")
-    print(f"upstream  {config.get('upstream')}")
+    for key, value in (("user", console.paint(user["login"], "bold", "cyan")), ("email", email or "(hidden)"),
+                       ("token", source), ("upstream", config.get("upstream"))):
+        print(f"{console.label(key, 10)}{value}")
     return 0
 
 
@@ -134,19 +133,19 @@ def cmd_config(args) -> int:
     cfg = config.load_config()
     if args.action == "list":
         for key in config.keys():
-            print(f"{key:<10} {config.get(key) or '-'}")
-        print(f"{'api_base':<10} {config.api_base()}  (derived)")
+            print(f"{console.label(key, 10)}{config.get(key) or '-'}")
+        print(f"{console.label('api_base', 10)}{config.api_base()}  {console.paint('(derived)', 'gray')}")
     elif args.action == "get":
         print(config.get(args.key))
     elif args.action == "set":
         config.get(args.key)  # validates the key name
         cfg[args.key] = args.value
         config.save_config(cfg)
-        print(f"✓ {args.key} = {args.value}")
+        console.say(f"✓ {args.key} = {args.value}")
     elif args.action == "unset":
         cfg.pop(args.key, None)
         config.save_config(cfg)
-        print(f"✓ {args.key} reset to default")
+        console.say(f"✓ {args.key} reset to default")
     return 0
 
 
@@ -159,7 +158,7 @@ def _ask_until(prompt: str, default: str | None, check=None) -> str:
         problem = check(value) if check else (None if value else "required")
         if not problem:
             return value
-        print(f"    ✗ {problem}")
+        console.say(f"    ✗ {problem}")
 
 
 def _per_url(value: str | None, count: int) -> list[str | None]:
@@ -176,7 +175,7 @@ def cmd_new(args) -> int:
     namespace = config.get("namespace")
     interactive = sys.stdin.isatty() and not args.yes
     if not args.dry_run:
-        print(f"→ target repository {upstream}")
+        console.say(f"→ target repository {upstream}")
 
     # 1. download + analyse every installer
     work = Path(tempfile.mkdtemp(prefix="create-", dir=config.temp_root()))
@@ -184,7 +183,7 @@ def cmd_new(args) -> int:
     arches, engine_overrides = _per_url(args.arch, len(args.urls)), _per_url(args.engine, len(args.urls))
     analysed = []
     for index, url in enumerate(args.urls):
-        print(f"→ downloading {url}")
+        console.say(f"→ downloading {url}")
         try:
             dl = net.download(session, url, work / f"payload{index}", MAX_DOWNLOAD,
                               on_progress=console.progress("download"))
@@ -197,8 +196,9 @@ def cmd_new(args) -> int:
         engine = engine_overrides[index] or found.engine
         if not engine:
             return _die(f"{dl.path.name}: unsupported payload ({found.label}); pass --engine")
-        print(f"  {dl.path.name}: {dl.bytes:,} bytes · SHA-256 {dl.sha256}")
-        print(f"  {found.label} · installer CPU {found.machine or '-'} → arch {arch}, engine {engine}")
+        print(f"  {console.paint(dl.path.name, 'bold')}: {dl.bytes:,} bytes · SHA-256 {console.paint(dl.sha256, 'gray')}")
+        print(f"  {found.label} · installer CPU {found.machine or '-'} → arch {console.paint(arch, 'yellow', 'bold')}, "
+              f"engine {console.paint(engine, 'magenta', 'bold')}")
         analysed.append((url, dl, found, arch, engine))
     seen = [a[3] for a in analysed]
     if len(set(seen)) != len(seen):
@@ -220,11 +220,11 @@ def cmd_new(args) -> int:
         src = Source()
         latest, previous = src.release(package_id)
         published = src.versions(package_id)
-        print(f"→ {package_id} already published (latest {latest}) - reusing its metadata")
+        console.say(f"→ {package_id} already published (latest {latest}) - reusing its metadata")
     except Exception:
         if getattr(args, "update", False):
             return _die(f"{package_id} is not published yet - use `txacreate new`")
-        print(f"→ {package_id} is a new package")
+        console.say(f"→ {package_id} is a new package")
     prev_core = previous.get("core") or {}
     prev_build = previous.get("build") or {}
     prev_lang = (prev_core.get("locale") or {}).get("default")
@@ -297,7 +297,7 @@ def cmd_new(args) -> int:
     rendered = draft.render()
     for filename, text in rendered.items():
         (release / filename).write_text(text, "utf-8", newline="\n")
-    print(f"→ wrote {len(rendered)} card(s) to {release}")
+    console.say(f"→ wrote {len(rendered)} card(s) to {release}")
 
     # 5. local pre-flight with the very same 14 checks the bot runs
     report = None
@@ -307,7 +307,7 @@ def cmd_new(args) -> int:
                          payloads={rel: {t.arch: t.payload for t in draft.targets}})
         if published:
             ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
-        print("→ running TXA pre-flight (steps 01-14)…")
+        console.say("→ running TXA pre-flight (steps 01-14)…")
         for number in sorted(steps.REGISTRY):
             steps.run_step(ctx, number)
         report = build_report(ctx)
@@ -316,7 +316,7 @@ def cmd_new(args) -> int:
             return _die("pre-flight failed - fix the issues above or pass --force to open the PR anyway")
 
     if args.dry_run:
-        print("✓ dry run complete - nothing was sent to GitHub")
+        console.say("✓ dry run complete - nothing was sent to GitHub")
         return 0
 
     # 6. fork → branch → commit → PR  (the first step that needs GitHub access)
@@ -337,8 +337,8 @@ def cmd_new(args) -> int:
                         _pr_body(kind, draft, analysed, report), direct=args.direct)
     except GitHubError as exc:
         return _die(str(exc))
-    print(f"\n✓ pull request #{result.number} opened: {result.url}")
-    print(f"  branch {result.head_repo}@{result.branch} · the TXA Bot will now run its 16 steps")
+    console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
+    print(console.paint(f"  branch {result.head_repo}@{result.branch} · the TXA Bot will now run its 16 steps", "gray"))
     return 0
 
 
@@ -397,12 +397,12 @@ def cmd_hash(args) -> int:
         if not path.is_file():
             return _die(f"{source}: no such file")
     found = engines.inspect(path)
-    print(f"sha256   {net.sha256_file(path)}")
-    print(f"size     {path.stat().st_size}")
-    print(f"engine   {found.engine or '-'} ({found.label})")
-    print(f"arch     {guess_arch(path.name, found)} (installer CPU {found.machine or '-'})")
+    print(f"{console.label('sha256', 9)}{console.paint(net.sha256_file(path), 'green')}")
+    print(f"{console.label('size', 9)}{path.stat().st_size:,} bytes")
+    print(f"{console.label('engine', 9)}{console.paint(found.engine or '-', 'magenta', 'bold')} ({found.label})")
+    print(f"{console.label('arch', 9)}{console.paint(guess_arch(path.name, found), 'yellow', 'bold')} (installer CPU {found.machine or '-'})")
     if found.product_name or found.product_version:
-        print(f"product  {found.product_name or '-'} {found.product_version or ''}".rstrip())
+        print(f"{console.label('product', 9)}{found.product_name or '-'} {found.product_version or ''}".rstrip())
     return 0
 
 
@@ -418,7 +418,7 @@ def cmd_submit(args) -> int:
     package_id, version = bundle.package_id, bundle.version
     if not args.no_validate:
         ctx = init_local([folder], offline=args.offline)
-        print(f"→ validating {package_id} {version} (steps 01-14)…")
+        console.say(f"→ validating {package_id} {version} (steps 01-14)…")
         for number in sorted(steps.REGISTRY):
             steps.run_step(ctx, number)
         report = build_report(ctx)
@@ -447,7 +447,7 @@ def cmd_submit(args) -> int:
             f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).\n\n<sub>txacreate {__version__}</sub>")
     result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
                     direct=args.direct)
-    print(f"\n✓ pull request #{result.number} opened: {result.url}")
+    console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
     return 0
 
 
@@ -461,7 +461,7 @@ def cmd_show(args) -> int:
     documents = [("core.txa.yaml", cards["core"]), ("build.txa.yaml", cards["build"])]
     documents += [(f"about.{lang}.txa.yaml", card) for lang, card in cards["about"].items()]
     for name, card in documents:
-        print(f"# ---- {package_id} {version} · {name}")
+        print(console.paint(f"# ---- {package_id} {version} · {name}", "bold", "cyan"))
         print(dump_card(card))
     return 0
 

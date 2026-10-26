@@ -24,8 +24,12 @@ from txa.pm.installer import InstallError
 from txa.pm.source import NotFound, Source, SourceError, Sources, check_url
 
 
+P = console.paint  # colour a string
+C = console.cell   # pad to a column width, then colour
+
+
 def _die(message: str) -> int:
-    print(f"txapm: {message}", file=sys.stderr)
+    console.error("txapm", message)
     return 1
 
 
@@ -51,19 +55,19 @@ def _install(src: Source, package_id: str, version: str | None, args) -> int:
     build, about = cards["build"], _about(cards)
     target = installer.pick_target(build, getattr(args, "arch", None))
     origin = "" if src.name == config.OFFICIAL_SOURCE else f"  [source: {src.name}]"
-    print(f"→ {about['name']} {version} ({package_id}) · {target['arch']} · {target['engine']}{origin}"
+    console.say(f"→ {about['name']} {version} ({package_id}) · {target['arch']} · {target['engine']}{origin}"
           + ("  [GitHub fallback]" if src.used_fallback else ""))
     download_only = getattr(args, "download_only", False)
     if not download_only and not getattr(args, "skip_os_check", False):
         installer.check_os(build)
     previous = installer.installed().get(package_id)
     if previous and previous["version"] == version and not getattr(args, "force", False) and not download_only:
-        print(f"✓ {package_id} {version} is already installed (use --force to reinstall)")
+        console.say(f"✓ {package_id} {version} is already installed (use --force to reinstall)")
         return 0
 
     payload = installer.fetch(package_id, version, target, console.progress("download"), source=src)
     console.done_line()
-    print(f"✓ downloaded {payload} - SHA-256 verified")
+    console.say(f"✓ downloaded {payload} - SHA-256 verified")
     if download_only:
         return 0
 
@@ -73,13 +77,13 @@ def _install(src: Source, package_id: str, version: str | None, args) -> int:
     executable, params = installer.build_command(target, payload, mode, log)
     scope = build.get("scope", "machine")
     elevate = scope == "machine"
-    print(f"→ running {mode} install{' (elevation required)' if elevate and not installer.is_admin() else ''}")
+    console.say(f"→ running {mode} install{' (elevation required)' if elevate and not installer.is_admin() else ''}")
     code = installer.run(executable, params, elevate)
     meaning = installer.EXIT_CODES.get(code, "see the installer log")
     if code not in set(target.get("success_codes") or []) | installer.SUCCESS:
         return _die(f"installer exited with {code}: {meaning} (log: {log})")
     installer.record(package_id, version, target, code, about["name"], scope, src.name)
-    print(f"✓ {package_id} {version} installed ({meaning})")
+    console.say(f"✓ {package_id} {version} installed ({meaning})")
     return 0
 
 
@@ -119,21 +123,22 @@ def cmd_upgrade(args) -> int:
             return _die(f"{package_id} is pinned - use --include-pinned or `txapm pin remove {package_id}`")
         todo = {package_id: _available({package_id: records[package_id]}).get(package_id)}
         if not todo[package_id]:
-            print(f"✓ {package_id} {records[package_id]['version']} is up to date")
+            console.say(f"✓ {package_id} {records[package_id]['version']} is up to date")
             return 0
     else:
         todo = _available(records)
         pinned = installer.pins()
         for package_id in sorted(k for k in list(todo) if k in pinned and not args.include_pinned):
             todo.pop(package_id)
-            print(f"  {package_id:<40} pinned at {pinned[package_id]} - skipped (txapm pin remove to release)")
+            console.say(f"! {package_id} is pinned at {pinned[package_id]} - skipped (txapm pin remove {package_id})")
         if not todo:
-            print("✓ everything is up to date")
+            console.say("✓ everything is up to date")
             return 0
         for package_id, newest in sorted(todo.items()):
-            print(f"  {package_id:<40} {records[package_id]['version']:<10} → {newest}")
+            print(f"  {C(package_id, 40, 'bold')} {C(records[package_id]['version'], 10, 'gray')} "
+                  f"{P('→', 'cyan')} {P(newest, 'green', 'bold')}")
         if not args.all:
-            print(f"{len(todo)} upgrade(s) available - run `txapm upgrade --all` to apply")
+            console.say(f"! {len(todo)} upgrade(s) available - run {P('txapm upgrade --all', 'bold')} to apply")
             return 0
     failures = 0
     for package_id, newest in sorted(todo.items()):
@@ -165,12 +170,12 @@ def cmd_uninstall(args) -> int:
         return _die(f"several programs match '{name}': {listing} (use --all-matches)")
     for program in matches:
         executable, params = uninstall.split_command(uninstall.command(program, engine, args.interactive))
-        print(f"→ removing {program.name} {program.version or ''}".rstrip())
+        console.say(f"→ removing {program.name} {program.version or ''}".rstrip())
         code = installer.run(executable, params, scope == "machine")
         if code not in installer.SUCCESS:
             return _die(f"uninstaller exited with {code}: {installer.EXIT_CODES.get(code, 'unknown error')}")
     installer.forget(package_id)
-    print(f"✓ {package_id} uninstalled")
+    console.say(f"✓ {package_id} uninstalled")
     return 0
 
 
@@ -179,7 +184,7 @@ def cmd_list(args) -> int:
         return _list_machine(args)
     records = installer.installed()
     if not records:
-        print("nothing installed through txapm yet")
+        console.say("! nothing installed through txapm yet - try `txapm search <name>`")
         return 0
     try:
         available = _available(records)
@@ -189,10 +194,11 @@ def cmd_list(args) -> int:
     if args.upgrade_available:
         rows = [r for r in rows if r[0] in available]
     pinned = installer.pins()
-    print(f"{'Id':<40} {'Version':<10} {'Available':<10} {'Arch':<6} {'Source':<10} Pin")
+    print(console.head(f"{'Id':<40} {'Version':<10} {'Available':<10} {'Arch':<6} {'Source':<10} Pin"))
     for package_id, info in rows:
-        print(f"{package_id:<40} {info['version']:<10} {available.get(package_id, ''):<10} {info['arch']:<6} "
-              f"{info.get('source', config.OFFICIAL_SOURCE):<10} {pinned.get(package_id, '')}")
+        print(f"{C(package_id, 40, 'bold')} {C(info['version'], 10, 'green')} "
+              f"{C(available.get(package_id, ''), 10, 'yellow', 'bold')} {C(info['arch'], 6, 'gray')} "
+              f"{C(info.get('source', config.OFFICIAL_SOURCE), 10, 'magenta')} {P(pinned.get(package_id, ''), 'yellow')}")
     return 0
 
 
@@ -221,10 +227,12 @@ def _list_machine(args) -> int:
         if args.upgrade_available and not newest:
             continue
         rows.append((program.name[:38], entry["id"] if entry else "", version[:14], newest, origin))
-    print(f"{'Name':<38} {'Id':<32} {'Version':<14} {'Available':<10} Source")
+    print(console.head(f"{'Name':<38} {'Id':<32} {'Version':<14} {'Available':<10} Source"))
     for name, package_id, version, newest, source in rows:
-        print(f"{name:<38} {package_id:<32} {version:<14} {newest:<10} {source}")
-    print(f"{len(rows)} program(s)")
+        known = bool(package_id)
+        print(f"{C(name, 38, 'bold' if known else 'dim')} {C(package_id, 32, 'cyan')} {C(version, 14, 'green' if known else 'gray')} "
+              f"{C(newest, 10, 'yellow', 'bold')} {P(source, 'magenta')}")
+    console.say(f"{P(str(len(rows)), 'bold')} program(s)")
     return 0
 
 
@@ -232,20 +240,20 @@ def cmd_pin(args) -> int:
     pinned = installer.pins()
     if args.action == "list":
         if not pinned:
-            print("no pins")
+            console.say("! no pins")
         for package_id, version in sorted(pinned.items()):
-            print(f"{package_id:<40} {version}")
+            print(f"{C(package_id, 40, 'bold')} {P(version, 'yellow')}")
         return 0
     if not args.package:
         return _die(f"pin {args.action} needs a package id")
     package_id = _pick(args, args.package)[1]
     if args.action == "remove":
         installer.set_pin(package_id, None)
-        print(f"✓ {package_id} unpinned")
+        console.say(f"✓ {package_id} unpinned")
         return 0
     version = args.version or (installer.installed().get(package_id) or {}).get("version") or "*"
     installer.set_pin(package_id, version)
-    print(f"✓ {package_id} pinned at {version} - `txapm upgrade --all` will skip it")
+    console.say(f"✓ {package_id} pinned at {version} - `txapm upgrade --all` will skip it")
     return 0
 
 
@@ -261,8 +269,8 @@ def cmd_download(args) -> int:
     shutil.copy2(payload, dest)
     manifest = out / f"{package_id}-{version}.txa.json"
     manifest.write_text(json.dumps({"version": version, **cards}, indent=2, ensure_ascii=False), "utf-8")
-    print(f"✓ {dest} (SHA-256 verified)")
-    print(f"✓ {manifest}")
+    console.say(f"✓ {dest} (SHA-256 verified)")
+    console.say(f"✓ {manifest}")
     return 0
 
 
@@ -292,14 +300,14 @@ def cmd_source(args) -> int:
         if args.allow_lan:
             entry["allow_lan"] = True
         config.save_custom_sources([*custom, entry], official_enabled)
-        print(f"✓ source '{name}' added - {index.get('count', 0)} package(s)")
+        console.say(f"✓ source '{name}' added - {index.get('count', 0)} package(s)")
     elif action == "remove":
         if name.lower() == config.OFFICIAL_SOURCE:
             return _die("the official source cannot be removed - use `txapm source disable txa`")
         if name.lower() not in by_name:
             return _die(f"no source named '{name}'")
         config.save_custom_sources([c for c in custom if c["name"].lower() != name.lower()], official_enabled)
-        print(f"✓ source '{name}' removed")
+        console.say(f"✓ source '{name}' removed")
     elif action in ("enable", "disable"):
         if name.lower() not in by_name:
             return _die(f"no source named '{name}'")
@@ -309,31 +317,33 @@ def cmd_source(args) -> int:
         else:
             config.save_custom_sources([{**c, "enabled": flag} if c["name"].lower() == name.lower() else c
                                         for c in custom], official_enabled)
-        print(f"✓ source '{name}' {action}d")
+        console.say(f"✓ source '{name}' {action}d")
     elif action == "reset":
         config.save_custom_sources([], True)
         cfg = config.load_config()
         cfg.pop("api", None)
         config.save_config(cfg)
-        print("✓ sources reset to the official txa source only")
+        console.say("✓ sources reset to the official txa source only")
     elif action == "update":
         for source in Sources(name).items:
             try:
-                print(f"✓ {source.name}: {source.index().get('count', 0)} package(s)")
+                console.say(f"✓ {source.name}: {source.index().get('count', 0)} package(s)")
             except Exception as exc:
-                print(f"✗ {source.name}: {exc}")
+                console.say(f"✗ {source.name}: {exc}")
         return 0
     elif action == "export":
         print(json.dumps([{k: v for k, v in i.items() if k != "official"} for i in custom], indent=2))
         return 0
-    print(f"{'Name':<12} {'Enabled':<8} {'Argument':<58} Options")
+    print(console.head(f"{'Name':<12} {'Enabled':<8} {'Argument':<58} Options"))
     for item in config.sources():
         options = ", ".join(filter(None, [
             "official" if item.get("official") else "",
             f"token from %{item['token_env']}%" if item.get("token_env") else "",
             "LAN allowed" if item.get("allow_lan") else "",
         ]))
-        print(f"{item['name']:<12} {'yes' if item.get('enabled', True) else 'no':<8} {item['url']:<58} {options}")
+        on = item.get("enabled", True)
+        print(f"{C(item['name'], 12, 'bold', 'magenta')} {C('yes' if on else 'no', 8, 'green' if on else 'red')} "
+              f"{C(item['url'], 58, 'cyan')} {P(options, 'gray')}")
     return 0
 
 
@@ -343,16 +353,20 @@ def cmd_info() -> int:
     record = credentials.stored() or {}
     current = winos.current()
     email = f" <{record['email']}>" if record.get("email") else ""
-    print(f"txapm {__version__}")
-    print(f"windows     {winos.fmt(current) if current else '-'} · {winos.native_arch()}")
     enabled = [i["name"] for i in config.sources() if i.get("enabled", True)]
-    print(f"sources     {', '.join(enabled) or '(none enabled)'}")
-    print(f"repository  {config.get('upstream')}")
-    print(f"home        {config.txa_home()}")
-    print(f"downloads   {config.temp_root()}")
-    print(f"logs        {config.txa_home() / 'logs'}")
-    print(f"installed   {len(installer.installed())} package(s), {len(installer.pins())} pin(s)")
-    print(f"github      {record.get('login', '-')}{email}")
+    rows = [
+        ("windows", f"{winos.fmt(current) if current else '-'} · {winos.native_arch()}"),
+        ("sources", ", ".join(enabled) or "(none enabled)"),
+        ("repository", str(config.get("upstream"))),
+        ("home", str(config.txa_home())),
+        ("downloads", str(config.temp_root())),
+        ("logs", str(config.txa_home() / "logs")),
+        ("installed", f"{len(installer.installed())} package(s), {len(installer.pins())} pin(s)"),
+        ("github", f"{record.get('login', '-')}{email}"),
+    ]
+    print(f"{P('txapm', 'bold', 'cyan')} {P(__version__, 'green', 'bold')}")
+    for key, value in rows:
+        print(f"{console.label(key, 12)}{value}")
     return 0
 
 
@@ -373,31 +387,36 @@ def cmd_show(args) -> int:
     version, cards = src.release(package_id, args.version)
     build, about = cards["build"], _about(cards)
     if args.versions:
-        print("\n".join(src.versions(package_id)))
+        print("\n".join(P(v, "green") for v in src.versions(package_id)))
         return 0
     minimum = winos.parse_build(build["platform"]["min_build"])
-    print(f"{about['name']} {version}  ({package_id})  [source: {src.name}]")
+    print(f"{P(about['name'], 'bold', 'cyan')} {P(version, 'green', 'bold')}  {P('(' + package_id + ')', 'gray')}"
+          f"  {P('[source: ' + src.name + ']', 'magenta')}")
     print(f"  {about['summary']}")
-    print(f"  publisher  {about['publisher']}   author {about['author']}")
-    print(f"  license    {about['license']['name']}" + (f"  {about['license'].get('url')}" if about['license'].get('url') else ""))
+    print(f"  {console.label('publisher')}{about['publisher']}   {P('author', 'gray')} {about['author']}")
+    license_url = about["license"].get("url")
+    print(f"  {console.label('license')}{about['license']['name']}" + (f"  {P(license_url, 'cyan')}" if license_url else ""))
     if about.get("homepage"):
-        print(f"  homepage   {about['homepage']}")
-    print(f"  windows    {build['platform']['min_build']}+ ({winos.describe(minimum)}) · scope {build.get('scope', 'machine')}")
+        print(f"  {console.label('homepage')}{P(about['homepage'], 'cyan')}")
+    print(f"  {console.label('windows')}{build['platform']['min_build']}+ ({winos.describe(minimum)}) · scope {build.get('scope', 'machine')}")
     for target in build["targets"]:
-        print(f"  [{target['arch']}] {target['engine']:<5} {target['source']['url']}")
-        print(f"         sha256 {target['source']['sha256']}")
+        arch_tag = P("[" + target["arch"] + "]", "yellow", "bold")
+        engine_tag = P(target["engine"].ljust(5), "magenta")
+        print(f"  {arch_tag} {engine_tag} {P(target['source']['url'], 'cyan')}")
+        print(f"        {P('sha256', 'gray')} {target['source']['sha256']}")
     return 0
 
 
 def cmd_search(args) -> int:
     hits = Sources(args.source).search(args.text)
     if not hits:
-        print("no packages found")
+        console.say(f"! no packages found for '{args.text}' - the repository may be empty or the name differs")
         return 1
     width = max(len(h["id"]) for _, h in hits)
-    print(f"{'Id':<{width}}  {'Version':<10} {'Source':<10} Summary")
+    print(console.head(f"{'Id':<{width}}  {'Version':<10} {'Source':<10} Summary"))
     for source, hit in hits:
-        print(f"{hit['id']:<{width}}  {hit['latest']:<10} {source.name:<10} {hit['summary']}")
+        print(f"{C(hit['id'], width, 'bold')}  {C(hit['latest'], 10, 'green')} {C(source.name, 10, 'magenta')} {hit['summary']}")
+    console.say(f"{P(str(len(hits)), 'bold')} package(s) - install with {P('txapm install <Id>', 'bold')}")
     return 0
 
 
@@ -409,7 +428,7 @@ def cmd_export(args) -> int:
                      for k, v in sorted(records.items())],
     }
     Path(args.file).write_text(json.dumps(document, indent=2) + "\n", "utf-8")
-    print(f"✓ exported {len(records)} package(s) to {args.file}")
+    console.say(f"✓ exported {len(records)} package(s) to {args.file}")
     return 0
 
 
@@ -428,8 +447,8 @@ def cmd_import(args) -> int:
             failures += _install(src, item["id"], item["version"] if args.exact_versions else None, args) != 0
         except (InstallError, NotFound, SourceError, net.NetError) as exc:
             failures += 1
-            print(f"txapm: {item['id']}: {exc}", file=sys.stderr)
-    print(f"{'✓' if not failures else '!'} import finished, {failures} failure(s)")
+            console.error("txapm", f"{item['id']}: {exc}")
+    console.say(f"{'✓' if not failures else '!'} import finished, {failures} failure(s)")
     return 1 if failures else 0
 
 

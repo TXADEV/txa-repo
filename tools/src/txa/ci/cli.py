@@ -36,10 +36,11 @@ def _escape(text: str) -> str:
 def _emit(number: int, results) -> None:
     in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
     for target, outcome in results:
-        print(f"{target['path']} → {outcome.status}")
+        print(f"{console.paint(target['path'], 'bold', 'cyan')} → {console.status(outcome.status)}")
         for message in outcome.messages:
             level, text = message["level"], message["text"]
-            print(f"  [{level}] {text}")
+            shade = {"fail": ("red", "bold"), "warn": ("yellow",), "ok": ("green",), "skip": ("gray",)}.get(level, ("cyan",))
+            print(f"  {console.paint('[' + level + ']', *shade)} {text}")
             if in_actions and level in ("fail", "warn"):
                 kind = "error" if level == "fail" else "warning"
                 print(f"::{kind} title=STEP {number:02d} · {steps.TITLES[number]}::{_escape(target['path'] + ': ' + text)}")
@@ -61,7 +62,7 @@ def cmd_step(args) -> int:
     if number not in steps.REGISTRY:
         raise SystemExit(f"txaci: step {number} is not a validation step (1-{LAST_VALIDATION_STEP})")
     ctx = Context.load(Path(args.state))
-    print(f"STEP {number:02d} · {steps.TITLES[number]}")
+    print(console.paint(f"STEP {number:02d} · {steps.TITLES[number]}", "bold"))
     if not ctx.targets:
         print("  no manifest releases in this change set - skipped")
         return 0
