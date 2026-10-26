@@ -31,19 +31,19 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout pull request head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Checkout trusted tools from the base commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: .txa-trusted
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload report for TXA Gate
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: txa-report
           path: ${{ runner.temp }}/txa-report/report.json

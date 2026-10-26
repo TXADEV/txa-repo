@@ -27,9 +27,9 @@ jobs:
         shell: pwsh
         working-directory: tools
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           architecture: ${{ matrix.arch }}
@@ -60,7 +60,7 @@ jobs:
           & dist/txapm.exe --version
           Compress-Archive -Path dist/txapm.exe, dist/txacreate.exe -DestinationPath "txa-windows-${{ matrix.arch }}.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: txa-windows-${{ matrix.arch }}
           path: tools/txa-windows-${{ matrix.arch }}.zip
@@ -70,9 +70,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
