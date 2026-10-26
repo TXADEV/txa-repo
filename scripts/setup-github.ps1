@@ -50,8 +50,17 @@ function Invoke-Gh {
 
 function Invoke-GhSoft {
     param([Parameter(ValueFromRemainingArguments)] [string[]]$Arguments)
-    $output = & gh @Arguments 2>$null
-    return [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Output = $output }
+    # Windows PowerShell 5.1 turns native stderr into terminating errors under 'Stop',
+    # even when redirected - relax it for calls that are allowed to fail.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & gh @Arguments 2>$null
+        $ok = ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return [pscustomobject]@{ Ok = $ok; Output = $output }
 }
 
 function Publish-Folder([string]$Folder, [string]$Slug, [string]$Description) {
