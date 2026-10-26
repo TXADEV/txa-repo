@@ -192,7 +192,12 @@ def merge_gate(gh: GitHub, merger: GitHub, repo: str, state_path: Path, report_p
                     print(f"STEP 16: PR #{gate['pr']} was already approved and green - squash-merged")
                     gate["step16"] = {"status": "PASS", "detail": "approved by a code owner - squash-merged"}
                     return _finish(gh, repo, gate, state_path, report_path, run_url)
-                raise
+                # report it in the comment instead of leaving "evaluating merge gate" on the PR forever
+                reason = str(exc).replace("GitHub API 200: ", "")[:160]
+                print(f"::warning::could not arm auto-merge: {reason}")
+                gate["step16"] = {"status": "FAIL", "detail": f"could not arm auto-merge ({reason}) - "
+                                  f"a moderator can still review and merge by hand · {lock}"}
+                return _finish(gh, repo, gate, state_path, report_path, run_url)
         if decision == "APPROVED":
             detail = "auto-merge (squash) armed · code-owner approval present - merging"
         else:

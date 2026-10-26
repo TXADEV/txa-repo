@@ -12,7 +12,9 @@ on:
     types: [completed]
 
 permissions:
-  contents: read
+  # contents: write is what GitHub demands for "enable auto-merge". Safe here: this job only runs
+  # trusted default-branch code and never checks out or executes anything from the pull request.
+  contents: write
   actions: read
   issues: write
   pull-requests: write

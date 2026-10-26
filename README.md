@@ -218,18 +218,36 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 
 ### Sau khi gửi Pull Request
 
-Bot TXA kiểm tra tự động **16 bước**: mã hoá file, cú pháp, tên gói, phiên bản, giấy phép, HTTPS,
-dung lượng, CDN ở 6 khu vực, tải về, chữ ký số, SHA-256, kiến trúc, phiên bản Windows, tham số cài im lặng.
-Kết quả hiện ngay trong PR.
+Ngay khi PR được mở, bot đăng một **bảng tiến trình** và tự cập nhật từng bước ngay trong PR
+(⏳ chờ → 🔄 đang chạy → ✅ xong / ❌ lỗi, kèm thời gian mỗi bước):
 
-| Nhãn bot gắn | Nghĩa |
+```
+🤖 TXA Bot · Validating…
+████████░░░░░░  8/14 checks done
+🔄 Running step 09 · Binary Stream Integrity & Download Verification
+```
+
+Bot kiểm tra tự động **16 bước**: mã hoá file, cú pháp, tên gói, phiên bản, giấy phép, HTTPS,
+dung lượng, CDN ở 6 khu vực, tải về, chữ ký số, SHA-256, kiến trúc, phiên bản Windows, tham số cài im lặng,
+rồi gắn nhãn và bật tự gộp. Xong, bình luận được thay bằng **báo cáo đầy đủ**: bảng thông tin bộ cài
+(loại, CPU, dung lượng, chữ ký, SHA-256), kết quả và thời gian từng bước, và mục "Full output of every check"
+liệt kê chi tiết từng bước như khi chạy bằng dòng lệnh.
+
+| Nhãn | Nghĩa |
 |---|---|
+| `txa:validating` | bot đang chạy các bước kiểm tra |
 | `txa:verified-build` | qua hết kiểm tra tự động |
-| `txa:awaiting-review` | đang chờ moderator duyệt |
+| `txa:awaiting-review` | qua kiểm tra, chờ moderator duyệt |
+| `txa:approved` | moderator đã duyệt, sẽ tự gộp |
+| `txa:published` | **đã gộp** — gói đã nằm trong kho |
 | `txa:fix-required` | có lỗi — đọc comment của bot, sửa rồi push lại, bot tự chạy lại |
 | `txa:new-app` / `txa:new-version` | gói mới / phiên bản mới |
 
-Moderator duyệt xong, PR tự gộp, vài phút sau mọi người cài được bằng `txapm install`.
+Nhãn đi theo đúng vòng đời, không còn nhãn cũ nằm lại: duyệt xong thì `awaiting-review` đổi thành `approved`,
+gộp xong đổi thành `published` và bot ghi sẵn lệnh `txapm install` vào bình luận. Khoảng hai phút sau mọi người
+cài được gói đó.
+
+`txacreate` tự mở trang PR trên trình duyệt ngay khi tạo xong (thêm `--no-browser` nếu không muốn).
 
 ---
 
