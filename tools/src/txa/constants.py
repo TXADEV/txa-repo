@@ -18,7 +18,7 @@ def _baked(name: str, default: str) -> str:
 
 
 UPSTREAM_REPO = _baked("UPSTREAM_REPO", "TXAVL/txa-repo")  # manifests, tools and releases live here
-GITHUB_CLIENT_ID = _baked("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_ID = _baked("GITHUB_CLIENT_ID", "Ov23li4g1C3hqWizG52D")  # public OAuth App id (Device Flow)
 API_BASE = _baked("API_BASE", "")
 DEFAULT_NAMESPACE = _baked("DEFAULT_NAMESPACE", "TXAVL")
 
