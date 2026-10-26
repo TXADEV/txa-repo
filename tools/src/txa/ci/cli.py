@@ -23,7 +23,7 @@ from pathlib import Path
 from txa import __version__
 from txa.ci import steps
 from txa.ci.context import Context, init_ci, init_local
-from txa.ci.report import build_report, render_console, render_markdown
+from txa.ci.report import build_report, render_console, render_markdown, run_live
 from txa.core import console
 
 LAST_VALIDATION_STEP = 14
@@ -89,13 +89,10 @@ def cmd_verdict(args) -> int:
 
 def cmd_validate(args) -> int:
     ctx = init_local([Path(p) for p in args.paths], offline=args.offline)
-    numbers = sorted(steps.REGISTRY) if not args.only else [int(n) for n in args.only.split(",")]
-    for number in numbers:
-        steps.run_step(ctx, number)
-    report = build_report(ctx)
+    numbers = [int(n) for n in args.only.split(",")] if args.only else None
+    report = run_live(ctx, numbers)
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2), "utf-8")
-    print(render_console(report))
     return 1 if report["verdict"] == "fail" else 0
 
 

@@ -214,6 +214,8 @@ Write-Host '  (no login needed up front: GitHub access is asked only at the fork
 Write-Heading 'Examples'
 Write-Host '  txapm search editor'
 Write-Host '  txapm install TXAVL.NotepadPlusPlus'
+Write-Host '  txapm install ffmpeg          (portable: unpacked + added to your PATH, no admin needed)'
+Write-Host '  txapm install npm             (npm ships with Node.js)'
 Write-Host '  txapm upgrade --all'
 Write-Host '  txacreate new https://vendor.example/app-2.1.0-x64.exe'
 Write-Host ''

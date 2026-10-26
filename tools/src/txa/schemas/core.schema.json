@@ -29,6 +29,13 @@
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{1,39}$",
           "description": "Short name usable with `txapm install <alias>`."
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "description": "More short names for the same package (e.g. npm and node for Node.js).",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,39}$" }
         }
       }
     },

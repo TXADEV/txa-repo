@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import hmac
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from txa.ci.context import Context
-from txa.core import engines, net, semver, signing, winos
+from txa.core import engines, net, pe, portable, semver, signing, winos
 from txa.core.manifest import (
-    ABOUT_RE, BUILD_FILE, CORE_FILE, ID_RE, LANG_RE, about_file, kind_of, ref_of, release_dir, schema_errors,
+    ABOUT_RE, BUILD_FILE, CORE_FILE, ID_RE, LANG_RE, ManifestError, about_file, kind_of, parse_card, ref_of,
+    release_dir, schema_errors,
 )
 
 TITLES = {
@@ -273,12 +275,20 @@ def naming(ctx: Context, target: dict, out: Outcome) -> None:
     for name in sorted(bundle.files):
         if kind_of(name) is None:
             out.fail(f"unexpected file '{name}' - only core.txa.yaml, build.txa.yaml and about.<lang>.txa.yaml")
-    _check_collisions(ctx, package_id, (bundle.core or {}).get("package", {}).get("alias"), out)
+    _check_collisions(ctx, package_id, _names_of((bundle.core or {}).get("package", {})), out)
     if out.status in ("PASS", "SKIP"):
         out.ok(f"{package_id} → {expected} (namespace '{namespace}' registered)")
 
 
-def _check_collisions(ctx: Context, package_id: str, alias: str | None, out: Outcome) -> None:
+def _names_of(package: dict) -> set[str]:
+    """Short names a package answers to: alias + aliases."""
+    names = set(package.get("aliases") or [])
+    if package.get("alias"):
+        names.add(package["alias"])
+    return names
+
+
+def _check_collisions(ctx: Context, package_id: str, names: set[str], out: Outcome) -> None:
     root = ctx.repo_root / "manifests"
     if not root.is_dir():
         return
@@ -291,12 +301,21 @@ def _check_collisions(ctx: Context, package_id: str, alias: str | None, out: Out
             continue
         if other_id.lower() == lowered:
             out.fail(f"'{package_id}' differs only by letter case from existing package '{other_id}'")
-        if alias:
-            versions = [p.name for p in app_dir.iterdir() if p.is_dir() and semver.is_valid(p.name)]
-            newest = semver.latest(versions)
-            core = app_dir / newest / CORE_FILE if newest else None
-            if core and core.exists() and re.search(rf"(?m)^\s+alias:\s*['\"]?{re.escape(alias)}['\"]?\s*$", core.read_text("utf-8", "replace")):
-                out.fail(f"alias '{alias}' is already used by {other_id}")
+        if not names:
+            continue
+        versions = [p.name for p in app_dir.iterdir() if p.is_dir() and semver.is_valid(p.name)]
+        newest = semver.latest(versions)
+        core = app_dir / newest / CORE_FILE if newest else None
+        if not (core and core.exists()):
+            continue
+        try:
+            other = parse_card(core.read_text("utf-8")).get("package") or {}
+        except ManifestError:
+            continue
+        for name in sorted(names & _names_of(other)):
+            out.fail(f"short name '{name}' is already used by {other_id}")
+        for name in sorted(names & {app.lower() for app in [app_dir.name]}):
+            out.fail(f"short name '{name}' is the name of package {other_id}")
 
 
 # =========================================================================== 04
@@ -459,7 +478,7 @@ def payload_headers(ctx: Context, target: dict, out: Outcome) -> None:
             out.fail(f"[{arch}] Content-Type '{ctype}' - the URL serves a web page, not an installer")
         elif not ctype:
             out.warn(f"[{arch}] no Content-Type header")
-        wanted = ".msi" if item["engine"] == "msi" else ".exe"
+        wanted = {"msi": ".msi", "portable": ".zip"}.get(item["engine"], ".exe")
         names = [probe["final_url"].split("?", 1)[0].rsplit("/", 1)[-1]]
         disposition = headers.get("content-disposition", "")
         if "filename=" in disposition:
@@ -582,9 +601,10 @@ def download(ctx: Context, target: dict, out: Outcome) -> None:
             out.ok(f"[{arch}] {result.path.name}: {result.bytes} bytes received intact{extra}")
         with open(art["file"], "rb") as fh:
             head = fh.read(16)
-        if head[:2] != b"MZ" and head[:8] != engines.CFB_MAGIC:
+        is_zip = head[:4] == b"PK\x03\x04"
+        if head[:2] != b"MZ" and head[:8] != engines.CFB_MAGIC and not (is_zip and item["engine"] == "portable"):
             sniff = head[:15].decode("ascii", "replace")
-            out.fail(f"[{arch}] payload is not a Windows installer (starts with {sniff!r})")
+            out.fail(f"[{arch}] payload is not a Windows installer or portable ZIP (starts with {sniff!r})")
 
 
 # =========================================================================== 10
@@ -604,6 +624,9 @@ def authenticode(ctx: Context, target: dict, out: Outcome) -> None:
         file = _artifact_file(ctx, target, arch)
         if not file:
             out.skip(f"[{arch}] no payload (see STEP 09)")
+            continue
+        if item["engine"] == "portable":
+            out.skip(f"[{arch}] portable ZIP - an archive cannot carry an Authenticode signature")
             continue
         sig = signing.verify(file)
         ctx.artifact(target, arch)["signature"] = {
@@ -654,6 +677,54 @@ def checksum(ctx: Context, target: dict, out: Outcome) -> None:
 # =========================================================================== 12
 
 
+def _check_portable(item: dict, file: Path, found: engines.Inspection, out: Outcome) -> None:
+    """Portable ZIP: safe to unpack, declared strip/PATH folders hold programs, CPU matches."""
+    arch = item["arch"]
+    if found.format != "zip":
+        out.fail(f"[{arch}] engine 'portable' declared but the payload is {found.label}")
+        return
+    if item["engine"] != "portable":
+        out.fail(f"[{arch}] the payload is a ZIP archive - declare engine: portable")
+        return
+    spec = item["portable"]
+    strip, folders = int(spec.get("strip", 0)), spec["path"]
+    try:
+        by_folder = portable.exes(file, strip)
+    except portable.ZipProblem as exc:
+        out.fail(f"[{arch}] unsafe archive: {exc}")
+        return
+    ok = True
+    for folder in folders:
+        if folder not in by_folder:
+            hint = f" (found programs in: {', '.join(by_folder)})" if by_folder else " (the archive has no .exe)"
+            out.fail(f"[{arch}] PATH folder '{folder}' has no .exe after strip={strip}{hint}")
+            ok = False
+    if not ok:
+        return
+    sample = None
+    machine = found.payload_arch if folders[0] == (found.portable.get("path") or [None])[0] and strip == found.portable.get("strip") else None
+    if machine is None:
+        entry = portable.find_exe(file, strip, folders[0])
+        sample = portable.read_member(file, entry) if entry else None
+        try:
+            machine = pe.read_pe(sample, with_version=False).machine if sample else None
+        except pe.PEError as exc:
+            out.fail(f"[{arch}] {entry.parts[-1]}: {exc}")
+            return
+        finally:
+            if sample:
+                shutil.rmtree(sample.parent, ignore_errors=True)
+    programs = ", ".join(sorted({name for f in folders for name in by_folder[f]}))
+    layout = found.layout
+    summary = f"{layout.files} files, {layout.unpacked / 1048576:.0f} MiB unpacked, PATH {', '.join(folders)} → {programs}"
+    if machine == arch:
+        out.ok(f"[{arch}] portable ZIP, native {machine} programs; {summary}")
+    elif machine == "x86" and arch in ("x64", "arm64"):
+        out.warn(f"[{arch}] portable ZIP holds 32-bit programs; {summary}")
+    else:
+        out.fail(f"[{arch}] programs in '{folders[0]}' are {machine}, which cannot be declared as {arch}")
+
+
 @step(12)
 def binary(ctx: Context, target: dict, out: Outcome) -> None:
     for item in _targets_or_skip(ctx, target, out):
@@ -673,6 +744,9 @@ def binary(ctx: Context, target: dict, out: Outcome) -> None:
             out.info(f"[{arch}] {note}")
         if found.format == "unknown":
             out.fail(f"[{arch}] unsupported payload format ({found.label})")
+            continue
+        if engine == "portable" or found.format == "zip":
+            _check_portable(item, file, found, out)
             continue
         if engine == "msi" and found.format != "msi":
             out.fail(f"[{arch}] engine 'msi' declared but the payload is a {found.label}")
@@ -749,6 +823,9 @@ def os_compat(ctx: Context, target: dict, out: Outcome) -> None:
 def switches(ctx: Context, target: dict, out: Outcome) -> None:
     for item in _targets_or_skip(ctx, target, out):
         arch, engine = item["arch"], item["engine"]
+        if engine == "portable":
+            out.ok(f"[{arch}] portable: txapm unpacks the archive and edits PATH - nothing is executed, no switches")
+            continue
         effective = engines.effective_switches(item)
         errors, warnings = engines.check_switches(engine, effective)
         if engine == "msi" and any(t.lower() in ("/i", "/package", "/x") for t in engines.tokens(" ".join(effective.values()))):

@@ -14,6 +14,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,40 +51,92 @@ def _source_of(record: dict | None) -> Source:
         return Source()
 
 
-def _install(src: Source, package_id: str, version: str | None, args) -> int:
+def _install(src: Source, package_id: str, version: str | None, args, header: str | None = None) -> int:
+    """Resolve -> download -> verify -> install -> record, announcing each phase as [n/N]."""
+    started = time.monotonic()
+    download_only = getattr(args, "download_only", False)
+    total = 3 if download_only else 5
+    if header:
+        print(f"\n{P(header, 'bold', 'magenta')}")
+
+    # [1] resolve
     version, cards = src.release(package_id, version)
     build, about = cards["build"], _about(cards)
     target = installer.pick_target(build, getattr(args, "arch", None))
-    origin = "" if src.name == config.OFFICIAL_SOURCE else f"  [source: {src.name}]"
-    console.say(f"→ {about['name']} {version} ({package_id}) · {target['arch']} · {target['engine']}{origin}"
-          + ("  [GitHub fallback]" if src.used_fallback else ""))
-    download_only = getattr(args, "download_only", False)
+    engine, scope = target["engine"], build.get("scope", "machine")
+    origin = "" if src.name == config.OFFICIAL_SOURCE else f" from source {P(src.name, 'magenta')}"
+    fallback = P(" (via GitHub fallback)", "gray") if src.used_fallback else ""
+    console.stage(1, total, f"Resolved {P(about['name'], 'bold')} {P(version, 'green', 'bold')} "
+                            f"{P('(' + package_id + ')', 'gray')} · {target['arch']} · {P(engine, 'magenta')}{origin}{fallback}")
     if not download_only and not getattr(args, "skip_os_check", False):
         installer.check_os(build)
+    current = winos.current()
+    if current:
+        print(f"      {P('Windows', 'gray')} needs {build['platform']['min_build']}+, this PC runs {winos.fmt(current)}")
     previous = installer.installed().get(package_id)
     if previous and previous["version"] == version and not getattr(args, "force", False) and not download_only:
         console.say(f"✓ {package_id} {version} is already installed (use --force to reinstall)")
         return 0
 
-    payload = installer.fetch(package_id, version, target, console.progress("download"), source=src)
+    # [2] download
+    size = target["source"].get("size")
+    file_name = target["source"]["url"].split("?", 1)[0].rsplit("/", 1)[-1]
+    host = target["source"]["url"].split("/")[2]
+    console.stage(2, total, f"Downloading {P(file_name, 'bold')}"
+                            f"{P(f' ({console.human_size(size)})', 'gray') if size else ''} from {P(host, 'cyan')}")
+    result = installer.download_payload(package_id, version, target, console.progress("      "), source=src)
     console.done_line()
-    console.say(f"✓ downloaded {payload} - SHA-256 verified")
+
+    # [3] verify
+    try:
+        digest = installer.verify_payload(result, target)
+    except InstallError as exc:
+        console.stage(3, total, P("Verifying SHA-256", "red", "bold"))
+        return _die(str(exc))
+    console.stage(3, total, f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P('matches the manifest', 'green')}")
+    payload = result.path
     if download_only:
+        console.say(f"✓ saved to {payload}")
         return 0
 
-    mode = "interactive" if getattr(args, "interactive", False) else "progress" if getattr(args, "progress", False) else "silent"
-    log = config.txa_home() / "logs" / f"{package_id}-{version}.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    executable, params = installer.build_command(target, payload, mode, log)
-    scope = build.get("scope", "machine")
-    elevate = scope == "machine"
-    console.say(f"→ running {mode} install{' (elevation required)' if elevate and not installer.is_admin() else ''}")
-    code = installer.run(executable, params, elevate)
-    meaning = installer.EXIT_CODES.get(code, "see the installer log")
-    if code not in set(target.get("success_codes") or []) | installer.SUCCESS:
-        return _die(f"installer exited with {code}: {meaning} (log: {log})")
-    installer.record(package_id, version, target, code, about["name"], scope, src.name)
-    console.say(f"✓ {package_id} {version} installed ({meaning})")
+    # [4] install
+    extra: dict = {}
+    if engine == "portable":
+        console.stage(4, total, "Unpacking the portable archive and adding it to PATH")
+        bar = console.progress("      ")
+        try:
+            extra = installer.install_portable(package_id, version, target, payload, bar)
+        finally:
+            console.done_line()
+        code, meaning = 0, "unpacked"
+        scope = "user"
+        payload.unlink(missing_ok=True)
+        print(f"      {P('folder', 'gray')} {extra['dir']}")
+        for directory in extra["path_dirs"]:
+            print(f"      {P('PATH  ', 'gray')} {directory}")
+    else:
+        mode = "interactive" if getattr(args, "interactive", False) else "progress" if getattr(args, "progress", False) else "silent"
+        log = config.txa_home() / "logs" / f"{package_id}-{version}.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        executable, params = installer.build_command(target, payload, mode, log)
+        elevate = scope == "machine"
+        needs_uac = elevate and not installer.is_admin()
+        console.stage(4, total, f"Running the {P(engine, 'magenta')} installer ({mode})"
+                                f"{P(' - approve the UAC prompt', 'yellow') if needs_uac else ''}")
+        with console.working("installing…" if mode != "interactive" else "waiting for the installer window…", "      ") as busy:
+            code = installer.run(executable, params, elevate)
+        meaning = installer.EXIT_CODES.get(code, "see the installer log")
+        if code not in set(target.get("success_codes") or []) | installer.SUCCESS:
+            return _die(f"installer exited with {code}: {meaning} (log: {log})")
+        print(f"      {P('finished in ' + console.human_time(busy.elapsed), 'gray')} · exit code {code} ({meaning})")
+
+    # [5] record
+    installer.record(package_id, version, target, code, about["name"], scope, src.name, extra)
+    console.stage(5, total, "Recorded in the TXA install list")
+    console.say(f"✓ {P(about['name'], 'bold')} {P(version, 'green', 'bold')} installed in "
+                f"{console.human_time(time.monotonic() - started)} ({meaning})")
+    if engine == "portable":
+        print(P("  Open a new terminal so the updated PATH is picked up.", "yellow"))
     return 0
 
 
@@ -141,10 +194,18 @@ def cmd_upgrade(args) -> int:
             console.say(f"! {len(todo)} upgrade(s) available - run {P('txapm upgrade --all', 'bold')} to apply")
             return 0
     failures = 0
-    for package_id, newest in sorted(todo.items()):
+    items = sorted(todo.items())
+    for index, (package_id, newest) in enumerate(items, 1):
         args.arch = args.arch or records[package_id].get("arch")
-        failures += _install(_source_of(records[package_id]), package_id, newest, args) != 0
+        header = f"── {index}/{len(items)}  {package_id}  {records[package_id]['version']} → {newest}"
+        try:
+            failures += _install(_source_of(records[package_id]), package_id, newest, args, header) != 0
+        except (InstallError, NotFound, net.NetError) as exc:
+            failures += 1
+            _die(f"{package_id}: {exc}")
         args.arch = None
+    if len(items) > 1:
+        console.say(f"{'✓' if not failures else '!'} upgraded {len(items) - failures} of {len(items)} package(s)")
     return 1 if failures else 0
 
 
@@ -162,6 +223,16 @@ def cmd_uninstall(args) -> int:
         _, cards = src.release(package_id)
         name, engine = _about(cards)["name"], installer.pick_target(cards["build"])["engine"]
         scope = cards["build"].get("scope", "machine")
+    started = time.monotonic()
+    if engine == "portable":
+        console.stage(1, 2, f"Removing {P(name, 'bold')} from the user PATH")
+        with console.working("deleting its folder…", "      "):
+            folder = installer.uninstall_portable(package_id)
+        console.stage(2, 2, f"Deleted {folder}" if folder else "Nothing left on disk")
+        installer.forget(package_id)
+        console.say(f"✓ {package_id} uninstalled in {console.human_time(time.monotonic() - started)}")
+        return 0
+    console.stage(1, 2, f"Looking for {P(name, 'bold')} in the installed programs")
     matches = uninstall.find(name, uninstall.installed_programs())
     if not matches:
         return _die(f"'{name}' is not in the list of installed programs")
@@ -170,12 +241,14 @@ def cmd_uninstall(args) -> int:
         return _die(f"several programs match '{name}': {listing} (use --all-matches)")
     for program in matches:
         executable, params = uninstall.split_command(uninstall.command(program, engine, args.interactive))
-        console.say(f"→ removing {program.name} {program.version or ''}".rstrip())
-        code = installer.run(executable, params, scope == "machine")
+        console.stage(2, 2, f"Running the uninstaller for {P((program.name + ' ' + (program.version or '')).strip(), 'bold')}"
+                            f"{P(' - approve the UAC prompt', 'yellow') if scope == 'machine' and not installer.is_admin() else ''}")
+        with console.working("uninstalling…", "      "):
+            code = installer.run(executable, params, scope == "machine")
         if code not in installer.SUCCESS:
             return _die(f"uninstaller exited with {code}: {installer.EXIT_CODES.get(code, 'unknown error')}")
     installer.forget(package_id)
-    console.say(f"✓ {package_id} uninstalled")
+    console.say(f"✓ {package_id} uninstalled in {console.human_time(time.monotonic() - started)}")
     return 0
 
 
@@ -440,15 +513,18 @@ def cmd_import(args) -> int:
     if document.get("kind") != "export":
         return _die(f"{args.file} is not a txapm export file")
     failures = 0
-    for item in document.get("packages", []):
+    packages = document.get("packages", [])
+    for index, item in enumerate(packages, 1):
         args.arch = item.get("arch")
+        header = f"── {index}/{len(packages)}  {item['id']}"
         try:
             src = _source_of(item)
-            failures += _install(src, item["id"], item["version"] if args.exact_versions else None, args) != 0
+            failures += _install(src, item["id"], item["version"] if args.exact_versions else None, args, header) != 0
         except (InstallError, NotFound, SourceError, net.NetError) as exc:
             failures += 1
             console.error("txapm", f"{item['id']}: {exc}")
-    console.say(f"{'✓' if not failures else '!'} import finished, {failures} failure(s)")
+    console.say(f"{'✓' if not failures else '!'} import finished: {len(packages) - failures} of {len(packages)} installed, "
+                f"{failures} failure(s)")
     return 1 if failures else 0
 
 

@@ -51,7 +51,7 @@ def use_color(stream=None) -> bool:
     stream = stream or sys.stdout
     if os.environ.get("NO_COLOR"):
         return False
-    if os.environ.get("FORCE_COLOR"):
+    if os.environ.get("FORCE_COLOR", "0") not in ("", "0", "false"):
         return True
     if os.environ.get("TERM") == "dumb":
         return False
@@ -100,18 +100,59 @@ def status(name: str) -> str:
     return paint(f"{name:<4}", {"PASS": "green", "WARN": "yellow", "FAIL": "red", "SKIP": "gray"}.get(name, "dim"), "bold")
 
 
+def human_time(seconds: float) -> str:
+    seconds = int(seconds + 0.5)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    return f"{minutes}m{seconds:02d}s"
+
+
+def human_size(count: float) -> str:
+    if count >= 1048576:
+        return f"{count / 1048576:.1f} MiB"
+    return f"{count / 1024:.0f} KiB" if count >= 1024 else f"{count:.0f} B"
+
+
+def stage(index: int, total: int, text: str) -> None:
+    """A numbered phase of a long command: ``[2/5] Downloading …``."""
+    print(f"{paint(f'[{index}/{total}]', 'cyan', 'bold')} {text}")
+
+
 def progress(label_text: str):
-    """Return an on_progress(done, total) callback that draws a single-line bar."""
+    """Return an on_progress(done, total) callback drawing one live line.
+
+    ``Downloading  [##########............]  42%  11.3/27.0 MiB  5.2 MiB/s  ETA 3s``
+    Only drawn on a real terminal; call done_line() when finished.
+    """
+    started: list[float] = []
+    last = [0.0]
+
     def draw(done: int, total: int | None) -> None:
         if not sys.stderr.isatty():
             return
+        import time
+
+        now = time.monotonic()
+        if not started:
+            started.append(now)
+        if now - last[0] < 0.1 and not (total and done >= total):
+            return
+        last[0] = now
+        elapsed = max(now - started[0], 1e-6)
+        speed = done / elapsed
         if total:
-            width = 30
+            width = 28
             filled = int(width * done / total)
             bar = paint("#" * filled, "green", stream=sys.stderr) + paint("." * (width - filled), "gray", stream=sys.stderr)
-            sys.stderr.write(f"\r  {label_text} [{bar}] {done * 100 // total:3d}% ")
+            eta = (total - done) / speed if speed > 0 and elapsed > 0.5 else 0
+            tail = f"{human_size(done)}/{human_size(total)}  {human_size(speed)}/s"
+            if done < total and elapsed > 0.5:
+                tail += f"  ETA {human_time(eta)}"
+            line = f"  {label_text} [{bar}] {done * 100 // total:3d}%  {tail}"
         else:
-            sys.stderr.write(f"\r  {label_text} {done / 1048576:.1f} MiB ")
+            line = f"  {label_text} {human_size(done)}  {human_size(speed)}/s"
+        sys.stderr.write("\r" + line + "   ")
         sys.stderr.flush()
     return draw
 
@@ -119,6 +160,57 @@ def progress(label_text: str):
 def done_line() -> None:
     if sys.stderr.isatty():
         sys.stderr.write("\n")
+
+
+class working:
+    """Spinner with elapsed time for a call that blocks (an installer, a network step).
+
+    ``with console.working("Installing silently") as w: ...``; prints nothing unless stderr is a terminal.
+    ``w.elapsed`` is available afterwards.
+    """
+
+    _FRAMES = "-\\|/"
+
+    def __init__(self, text: str, indent: str = "  "):
+        self.text = text
+        self.indent = indent
+        self.elapsed = 0.0
+        self._stop = None
+        self._thread = None
+        self._started = 0.0
+
+    def update(self, text: str) -> None:
+        self.text = text
+
+    def __enter__(self) -> "working":
+        import threading
+        import time
+
+        self._started = time.monotonic()
+        self._stop = threading.Event()
+        if sys.stderr.isatty():
+            def spin() -> None:
+                index = 0
+                while not self._stop.wait(0.12):
+                    spent = human_time(time.monotonic() - self._started)
+                    frame = paint(self._FRAMES[index % len(self._FRAMES)], "cyan", "bold", stream=sys.stderr)
+                    sys.stderr.write(f"\r{self.indent}{frame} {self.text} {paint(spent, 'gray', stream=sys.stderr)}   ")
+                    sys.stderr.flush()
+                    index += 1
+
+            self._thread = threading.Thread(target=spin, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        import time
+
+        self.elapsed = time.monotonic() - self._started
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+            sys.stderr.write("\r" + " " * (len(self.indent) + len(self.text) + 16) + "\r")
+            sys.stderr.flush()
 
 
 def ask(prompt: str, default: str | None = None) -> str:

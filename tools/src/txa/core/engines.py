@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import re
 import shlex
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from txa.core import pe
+from txa.core import pe, portable
 
 CFB_MAGIC = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 _HEAD_SCAN = 32 * 1024 * 1024
@@ -46,13 +47,15 @@ _MSI_PLATFORMS = {"intel": "x86", "x64": "x64", "amd64": "x64", "arm64": "arm64"
 
 @dataclass
 class Inspection:
-    format: str  # pe | msi | unknown
-    engine: str | None = None  # inno | nsis | wix | msi | exe | None
+    format: str  # pe | msi | zip | unknown
+    engine: str | None = None  # inno | nsis | wix | msi | exe | portable | None
     label: str = "unknown"
     machine: str | None = None  # CPU of the installer binary itself
     payload_arch: str | None = None  # arch the package installs, when the format says so (MSI)
     pe: pe.PEInfo | None = None
     msi: dict[str, str] = field(default_factory=dict)
+    portable: dict = field(default_factory=dict)  # suggested {"strip": int, "path": [..]} for a ZIP
+    layout: "portable.Layout | None" = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -107,8 +110,38 @@ def inspect(path: Path | str) -> Inspection:
     if head[:2] == b"MZ":
         return _inspect_exe(path)
     if head[:4] == b"PK\x03\x04":
-        return Inspection(format="unknown", label="ZIP archive", notes=["ZIP/MSIX packages are not supported by TXA v1"])
+        return _inspect_zip(path)
     return Inspection(format="unknown")
+
+
+def _inspect_zip(path: Path) -> Inspection:
+    result = Inspection(format="zip", engine="portable", label="portable ZIP archive")
+    try:
+        layout = portable.analyse(path)
+    except portable.ZipProblem as exc:
+        result.format, result.engine, result.label = "unknown", None, "unusable ZIP archive"
+        result.notes.append(str(exc))
+        return result
+    result.layout = layout
+    result.portable = {"strip": layout.strip, "path": layout.suggested_path}
+    if not layout.suggested_path:
+        result.notes.append("the archive contains no .exe file")
+        return result
+    entry = portable.find_exe(path, layout.strip, layout.suggested_path[0])
+    if entry is None:
+        return result
+    sample = portable.read_member(path, entry)
+    try:
+        info = pe.read_pe(sample)
+        result.pe = info
+        result.machine = info.machine
+        if info.machine in ("x86", "x64", "arm64"):
+            result.payload_arch = info.machine
+    except pe.PEError as exc:
+        result.notes.append(f"{entry.parts[-1]}: {exc}")
+    finally:
+        shutil.rmtree(sample.parent, ignore_errors=True)
+    return result
 
 
 def _inspect_exe(path: Path) -> Inspection:
@@ -207,6 +240,8 @@ def check_switches(engine: str, switches: dict[str, str]) -> tuple[list[str], li
     """Return (errors, warnings) for the effective switches of one target."""
     errors: list[str] = []
     warnings: list[str] = []
+    if engine == "portable":
+        return errors, warnings  # nothing is executed, so there are no switches to check
     for mode, value in switches.items():
         if value and _META.search(value):
             errors.append(f"{mode}: shell metacharacters are not allowed ({value!r})")

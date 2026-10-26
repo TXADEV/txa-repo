@@ -82,7 +82,9 @@ Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls`
 | `TXAVL.Firefox` | `firefox` | Mozilla Firefox | 158.0.1 |
 | `TXAVL.Git` | `git` | Git cho Windows | 2.56.0 |
 | `TXAVL.Python` | `python` | Python | 3.14.10 |
-| `TXAVL.NodeJS` | `nodejs` | Node.js | 24.22.1 |
+| `TXAVL.NodeJS` | `nodejs`, `node`, `npm`, `npx` | Node.js (đã kèm npm) | 24.22.1 |
+| `TXAVL.NVM` | `nvm` | NVM for Windows — quản lý nhiều bản Node.js | 2.0.1 |
+| `TXAVL.FFmpeg` | `ffmpeg`, `ffprobe`, `ffplay` | FFmpeg — xử lý video và âm thanh (gói portable) | 9.0.2 |
 | `TXAVL.OBSStudio` | `obs` | OBS Studio — quay và phát trực tiếp | 33.0.0 |
 | `TXAVL.ShareX` | `sharex` | ShareX — chụp và quay màn hình | 21.0.0 |
 | `TXAVL.Audacity` | `audacity` | Audacity — chỉnh sửa âm thanh | 4.0.1 |
@@ -92,14 +94,22 @@ Ví dụ: `txapm install vlc` hoặc `txapm install TXAVL.VLC`. Danh sách đầ
 hoặc xem [trang chỉ mục](https://txavl.github.io/txa-repo/). Mỗi gói chỉ trỏ tới link tải **chính thức** của nhà
 phát hành; TXA không lưu lại bộ cài, và luôn đối chiếu SHA-256 trước khi chạy.
 
+`npm` không có bộ cài riêng, nó đi kèm Node.js: `txapm install npm` sẽ cài Node.js (có sẵn `node`, `npm`, `npx`).
+Cần đổi giữa nhiều bản Node.js thì dùng thêm `txapm install nvm`.
+
 ### Khi cài, TXA làm gì?
 
-1. Lấy thông tin gói từ kho `txa-repo` (đã được kiểm định 16 bước và có người duyệt).
-2. Chọn đúng bộ cài cho máy bạn (ARM64 → x64 → x86).
-3. Kiểm tra phiên bản Windows tối thiểu.
-4. Tải về `%TEMP%\txa\…` và so mã SHA-256. Sai một byte là **xoá file và dừng**.
-5. Cài im lặng. Gói cài cho toàn máy sẽ hiện hộp thoại UAC xin quyền admin.
-6. Ghi log vào `%LOCALAPPDATA%\TXA\logs`.
+Mỗi lần cài, màn hình báo từng bước `[1/5]` … `[5/5]` kèm thanh tiến trình có tốc độ và thời gian còn lại:
+
+1. **Resolve** — lấy thông tin gói từ kho `txa-repo` (đã được kiểm định 16 bước và có người duyệt), chọn đúng bộ cài cho máy bạn (ARM64 → x64 → x86), kiểm tra phiên bản Windows tối thiểu.
+2. **Download** — tải về `%TEMP%\txa\…`.
+3. **Verify** — so mã SHA-256. Sai một byte là **xoá file và dừng**.
+4. **Install** — cài im lặng (gói cài cho toàn máy sẽ hiện hộp thoại UAC xin quyền admin). Log nằm ở `%LOCALAPPDATA%\TXA\logs`.
+5. **Record** — ghi vào danh sách đã cài để `upgrade`, `uninstall`, `export` dùng.
+
+**Gói portable** (như FFmpeg) không có bộ cài: TXA giải nén vào `%LOCALAPPDATA%\TXA\apps\<Id>\<phiên-bản>`,
+thêm thư mục chương trình vào PATH của **riêng bạn** (không cần quyền admin) rồi nhắc mở terminal mới.
+`upgrade` thay bản cũ, `uninstall` xoá thư mục và gỡ khỏi PATH.
 
 ---
 

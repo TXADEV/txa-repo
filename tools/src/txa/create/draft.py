@@ -52,12 +52,16 @@ class TargetDraft:
     payload: Path
     switches: dict[str, str] = field(default_factory=dict)
     mirrors: list[str] = field(default_factory=list)
+    portable: dict = field(default_factory=dict)  # {"strip": n, "path": [...]} - engine "portable" only
 
     def card(self) -> dict:
         source = {"url": self.url, "sha256": self.sha256, "size": self.size}
         if self.mirrors:
             source["mirrors"] = self.mirrors
         entry = {"arch": self.arch, "engine": self.engine, "source": source}
+        if self.engine == "portable":
+            entry["portable"] = {k: v for k, v in self.portable.items() if k != "strip" or v}
+            return entry
         switches = {k: v for k, v in self.switches.items() if v}
         if switches:
             entry["switches"] = switches
@@ -71,6 +75,7 @@ class Draft:
     lang: str = "en-US"
     channel: str = "stable"
     alias: str | None = None
+    aliases: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     min_build: str = "10.0.17763"
     scope: str = "machine"
@@ -97,6 +102,8 @@ class Draft:
         package = {"id": self.package_id, "version": self.version, "channel": self.channel}
         if self.alias:
             package["alias"] = self.alias
+        if self.aliases:
+            package["aliases"] = self.aliases
         core = {"txa": 1, "kind": "core", "package": package, "locale": {"default": self.lang}}
         if self.tags:
             core["tags"] = self.tags

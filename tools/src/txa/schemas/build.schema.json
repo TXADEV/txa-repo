@@ -44,7 +44,7 @@
       "required": ["arch", "engine", "source"],
       "properties": {
         "arch": { "enum": ["x64", "x86", "arm64"] },
-        "engine": { "enum": ["inno", "nsis", "msi", "wix", "exe"] },
+        "engine": { "enum": ["inno", "nsis", "msi", "wix", "exe", "portable"] },
         "source": {
           "type": "object",
           "additionalProperties": false,
@@ -70,8 +70,40 @@
           "maxItems": 16,
           "uniqueItems": true,
           "items": { "type": "integer" }
+        },
+        "portable": {
+          "type": "object",
+          "description": "Only for engine: portable - a ZIP that is unpacked, not run.",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "strip": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4,
+              "description": "Leading folders dropped from every path inside the archive (1 = remove the single top folder)."
+            },
+            "path": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "description": "Folders (relative to the unpacked root, after strip) added to the user PATH.",
+              "items": { "type": "string", "maxLength": 128, "pattern": "^(\\.|[A-Za-z0-9_][A-Za-z0-9_. -]*(/[A-Za-z0-9_][A-Za-z0-9_. -]*)*)$" }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "engine": { "const": "portable" } }, "required": ["engine"] },
+          "then": {
+            "required": ["portable"],
+            "properties": { "switches": false, "success_codes": false }
+          },
+          "else": { "properties": { "portable": false } }
+        }
+      ]
     }
   }
 }

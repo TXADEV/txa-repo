@@ -29,7 +29,7 @@ ABOUT_RE = re.compile(r"^about\.(?P<lang>[A-Za-z0-9-]+)\.txa\.yaml$")
 ID_RE = re.compile(r"^(?P<namespace>[A-Z][A-Za-z0-9]{1,39})\.(?P<app>[A-Za-z0-9][A-Za-z0-9-]{0,63})$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2}|-\d{3})?$")
 ARCHES = ("x64", "x86", "arm64")
-ENGINES = ("inno", "nsis", "msi", "wix", "exe")
+ENGINES = ("inno", "nsis", "msi", "wix", "exe", "portable")
 SCHEMA_URL = "https://raw.githubusercontent.com/{repo}/main/tools/src/txa/schemas/{kind}.schema.json"
 
 

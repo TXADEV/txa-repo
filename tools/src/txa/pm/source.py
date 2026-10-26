@@ -128,7 +128,8 @@ class Source:
         lowered = query.lower()
         namespaced = f"{config.get('namespace')}.{query}".lower()
         for entry in self.index().get("packages", []):
-            if lowered in (entry["id"].lower(), (entry.get("alias") or "").lower()) or entry["id"].lower() == namespaced:
+            names = {entry["id"].lower(), (entry.get("alias") or "").lower(), *(a.lower() for a in entry.get("aliases", []))}
+            if lowered in names or entry["id"].lower() == namespaced:
                 return entry["id"]
         return None
 
@@ -139,12 +140,14 @@ class Source:
         return query if "." in query else f"{config.get('namespace')}.{query}"
 
     def search(self, text: str) -> list[dict]:
-        needle = text.lower()
+        """Every word of ``text`` must appear somewhere in the id, names, summary or tags ('-' counts as a space)."""
+        words = text.lower().replace("-", " ").split()
         hits = []
         for entry in self.index().get("packages", []):
-            haystack = " ".join([entry["id"], entry.get("alias") or "", entry.get("name", ""),
-                                 entry.get("summary", ""), " ".join(entry.get("tags", []))]).lower()
-            if needle in haystack:
+            haystack = " ".join([entry["id"], entry.get("alias") or "", " ".join(entry.get("aliases", [])),
+                                 entry.get("name", ""), entry.get("summary", ""),
+                                 " ".join(entry.get("tags", []))]).lower().replace("-", " ")
+            if all(word in haystack for word in words):
                 hits.append(entry)
         return hits
 

@@ -55,6 +55,7 @@ def index_document(packages: dict[str, dict[str, dict]]) -> dict:
         index.append({
             "id": package_id,
             "alias": latest["core"]["package"].get("alias"),
+            "aliases": latest["core"]["package"].get("aliases", []),
             "latest": document["latest"],
             "versions": list(document["versions"]),
             "name": about["name"],

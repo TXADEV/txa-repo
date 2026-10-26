@@ -20,7 +20,7 @@ from pathlib import Path
 from txa import __version__
 from txa.ci import steps
 from txa.ci.context import init_local
-from txa.ci.report import build_report, render_console
+from txa.ci.report import build_report, render_console, run_live
 from txa.core import config, console, credentials, engines, net, semver, winos
 from txa.core.github import GitHub, GitHubError, device_flow
 from txa.core.manifest import ManifestError, split_id
@@ -174,19 +174,21 @@ def cmd_new(args) -> int:
     upstream = config.get("upstream")
     namespace = config.get("namespace")
     interactive = sys.stdin.isatty() and not args.yes
+    total = 4 if args.dry_run else 5
     if not args.dry_run:
         console.say(f"→ target repository {upstream}")
 
     # 1. download + analyse every installer
+    console.stage(1, total, f"Downloading and analysing {len(args.urls)} file(s)")
     work = Path(tempfile.mkdtemp(prefix="create-", dir=config.temp_root()))
     session = net.session()
     arches, engine_overrides = _per_url(args.arch, len(args.urls)), _per_url(args.engine, len(args.urls))
     analysed = []
     for index, url in enumerate(args.urls):
-        console.say(f"→ downloading {url}")
+        print(f"      {console.paint(url, 'cyan')}")
         try:
             dl = net.download(session, url, work / f"payload{index}", MAX_DOWNLOAD,
-                              on_progress=console.progress("download"))
+                              on_progress=console.progress("      "))
         except net.NetError as exc:
             console.done_line()
             return _die(str(exc))
@@ -206,6 +208,7 @@ def cmd_new(args) -> int:
     _, first_dl, first, _, _ = analysed[0]
 
     # 2. identity + carry-over from the newest published release
+    console.stage(2, total, "Resolving the package identity and metadata")
     raw_name = args.name or first.product_name or name_from_filename(first_dl.path.name)
     package_id = args.id or f"{namespace}.{pascal(raw_name)}"
     try:
@@ -233,15 +236,19 @@ def cmd_new(args) -> int:
 
     version = args.version or semver.coerce(first.product_version) or semver.coerce(first_dl.path.name) \
         or semver.coerce(args.urls[0])
+    prev_package = prev_core.get("package") or {}
+    typed_names = [n.strip() for n in args.alias.split(",") if n.strip()] if args.alias else []
+    all_portable = all(a[4] == "portable" for a in analysed)
     draft = Draft(
         package_id=package_id,
         version=version or "",
         lang=args.lang or prev_lang or "en-US",
-        channel=args.channel or (prev_core.get("package") or {}).get("channel", "stable"),
-        alias=args.alias or (prev_core.get("package") or {}).get("alias"),
+        channel=args.channel or prev_package.get("channel", "stable"),
+        alias=typed_names[0] if typed_names else prev_package.get("alias"),
+        aliases=typed_names[1:] if typed_names else prev_package.get("aliases", []),
         tags=[t.strip() for t in args.tags.split(",")] if args.tags else prev_core.get("tags", []),
         min_build=args.min_build or (prev_build.get("platform") or {}).get("min_build") or "10.0.17763",
-        scope=args.scope or prev_build.get("scope") or "machine",
+        scope=args.scope or prev_build.get("scope") or ("user" if all_portable else "machine"),
         name=args.name or prev_about.get("name") or (first.product_name or raw_name),
         publisher=args.publisher or prev_about.get("publisher") or (first.company or ""),
         author=args.author or prev_about.get("author") or "",
@@ -275,6 +282,17 @@ def cmd_new(args) -> int:
         return _die(f"{package_id} {draft.version} is already published - bump the version")
 
     for url, dl, found, arch, engine in analysed:
+        if engine == "portable":
+            spec = dict(found.portable) if found.format == "zip" else {}
+            if args.path:
+                spec["path"] = [p.strip() for p in args.path.split(",") if p.strip()]
+            if args.strip is not None:
+                spec["strip"] = args.strip
+            if not spec.get("path"):
+                return _die(f"{dl.path.name}: no program folder found - pass --path <folder[,folder]> (and --strip N)")
+            draft.targets.append(TargetDraft(url, arch, engine, dl.sha256, dl.bytes, dl.path, {},
+                                             list(args.mirror or []) if len(analysed) == 1 else [], spec))
+            continue
         switches = dict(engines.DEFAULT_SWITCHES.get(engine, {}))
         if args.silent:
             switches["silent"] = args.silent
@@ -291,6 +309,7 @@ def cmd_new(args) -> int:
                                          list(args.mirror or []) if len(analysed) == 1 else []))
 
     # 4. write the cards
+    console.stage(3, total, "Writing the TXA cards")
     out_root = Path(args.out) if args.out else (Path.cwd() / "txa-out" if args.dry_run else work / "tree")
     release = out_root / draft.directory
     release.mkdir(parents=True, exist_ok=True)
@@ -307,11 +326,8 @@ def cmd_new(args) -> int:
                          payloads={rel: {t.arch: t.payload for t in draft.targets}})
         if published:
             ctx.targets[0].update({"mode": "new-version", "existing_versions": published})
-        console.say("→ running TXA pre-flight (steps 01-14)…")
-        for number in sorted(steps.REGISTRY):
-            steps.run_step(ctx, number)
-        report = build_report(ctx)
-        print(render_console(report))
+        console.stage(4, total, "Running the 14 bot checks locally (same code as the repository bot)")
+        report = run_live(ctx)
         if report["verdict"] == "fail" and not args.force:
             return _die("pre-flight failed - fix the issues above or pass --force to open the PR anyway")
 
@@ -320,6 +336,7 @@ def cmd_new(args) -> int:
         return 0
 
     # 6. fork → branch → commit → PR  (the first step that needs GitHub access)
+    console.stage(5, total, "Forking the repository and opening the pull request")
     try:
         gh, login = _sign_in(args.token)
     except GitHubError as exc:
@@ -418,13 +435,12 @@ def cmd_submit(args) -> int:
     package_id, version = bundle.package_id, bundle.version
     if not args.no_validate:
         ctx = init_local([folder], offline=args.offline)
-        console.say(f"→ validating {package_id} {version} (steps 01-14)…")
-        for number in sorted(steps.REGISTRY):
-            steps.run_step(ctx, number)
-        report = build_report(ctx)
-        print(render_console(report))
+        console.stage(1, 2, f"Validating {console.paint(package_id, 'bold')} {version} with the 14 bot checks")
+        report = run_live(ctx)
         if report["verdict"] == "fail" and not args.force:
             return _die("validation failed - fix the issues above or pass --force")
+    console.stage(2 if not args.no_validate else 1, 2 if not args.no_validate else 1,
+                  "Forking the repository and opening the pull request")
     try:
         gh, login = _sign_in(args.token)
     except GitHubError as exc:
@@ -486,7 +502,9 @@ def _release_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--license")
     p.add_argument("--license-url")
     p.add_argument("--lang", help="default locale (default en-US)")
-    p.add_argument("--alias")
+    p.add_argument("--alias", help="short name(s) for txapm, comma separated: node,npm")
+    p.add_argument("--strip", type=int, help="portable ZIP: leading folders to drop (default: detected)")
+    p.add_argument("--path", help="portable ZIP: folder(s) to add to PATH, comma separated (default: detected)")
     p.add_argument("--tags", help="comma separated")
     p.add_argument("--channel", choices=["stable", "beta"])
     p.add_argument("--arch", help="override per URL, comma separated: x64,x86,arm64")

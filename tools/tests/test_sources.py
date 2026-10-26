@@ -73,3 +73,13 @@ def test_credentials_only_go_to_the_source_host(home, monkeypatch):
     source = Source("https://pkgs.corp.example/api/txa/v1", name="corp", token_env="CORP_TOKEN", fallback=False)
     assert source.download_headers("https://pkgs.corp.example/files/a.exe") == {"Authorization": "Bearer s3cret"}
     assert source.download_headers("https://cdn.vendor.example/a.exe") == {}
+
+
+def test_search_matches_every_word_ignoring_hyphens(home):
+    repo = make_repo(home / "repo")
+    core = repo / "manifests/t/TXAVL/HelloTool/1.4.2/core.txa.yaml"
+    core.write_text(core.read_text("utf-8").replace("  - utility\n", "  - version-manager\n"), "utf-8", newline="\n")
+    source = Source(str(repo), name="t", fallback=False)
+    assert [p["id"] for p in source.search("version manager")] == ["TXAVL.HelloTool"]
+    assert source.search("hello greets") and not source.search("hello nothing-like-this")
+    assert len(source.search("")) == 1  # empty query lists everything

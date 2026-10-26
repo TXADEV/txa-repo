@@ -7,7 +7,7 @@ lang: en-US
 name: Node.js
 publisher: OpenJS Foundation
 author: OpenJS Foundation
-summary: JavaScript runtime built on the V8 engine for building fast, scalable network applications.
+summary: JavaScript runtime built on the V8 engine, installed together with the npm package manager.
 homepage: https://nodejs.org
 license:
   name: MIT

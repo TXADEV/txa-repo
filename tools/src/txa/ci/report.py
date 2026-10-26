@@ -103,6 +103,39 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
     return "\n".join(lines) + "\n"
 
 
+def run_live(ctx: Context, numbers: list[int] | None = None) -> dict:
+    """Run the validation steps, showing each one as it starts and finishes.
+
+    On a terminal the running step shows a spinner with its elapsed time; the finished step then
+    prints its status and findings. Returns the report (same as ``build_report``).
+    """
+    from txa.ci import steps
+
+    paint = console.paint
+    numbers = numbers or sorted(steps.REGISTRY)
+    count = len(steps.REGISTRY)
+    level_style = {"fail": ("red", "bold"), "warn": ("yellow",), "ok": ("green",), "info": ("cyan",), "skip": ("gray",)}
+    for target in ctx.targets:
+        print(f"\n{paint(target['path'], 'bold', 'cyan')}  {paint('[' + target['mode'] + ']', 'magenta')}")
+    for number in numbers:
+        tag = f"  {paint('STEP', 'gray')} {paint(f'{number:02d}', 'bold')}{paint(f'/{count}', 'gray')} "
+        with console.working(TITLES[number], indent=f"  STEP {number:02d}/{count} ") as busy:
+            results = steps.run_step(ctx, number)
+        for target, outcome in results:
+            took = paint(f"{busy.elapsed:.1f}s", "gray") if busy.elapsed >= 0.1 else ""
+            print(f"{tag}{console.status(outcome.status)}  {TITLES[number]}  {took}".rstrip())
+            for message in sorted(outcome.messages, key=lambda m: _ORDER.get(m["level"], 9)):
+                level, text = message["level"], message["text"]
+                if level in ("fail", "warn") or outcome.status == "PASS":
+                    label = paint(level.ljust(4), *level_style.get(level, ()))
+                    print(f"           {label}  {paint(text, 'red') if level == 'fail' else text}")
+    report = build_report(ctx)
+    verdict = report["verdict"]
+    shade = {"pass": ("green", "bold"), "fail": ("red", "bold")}.get(verdict, ("yellow", "bold"))
+    print(f"\nverdict: {paint(verdict.upper(), *shade)}")
+    return report
+
+
 def render_console(report: dict) -> str:
     level_style = {"fail": ("red", "bold"), "warn": ("yellow",), "ok": ("green",), "info": ("cyan",), "skip": ("gray",)}
     paint = console.paint

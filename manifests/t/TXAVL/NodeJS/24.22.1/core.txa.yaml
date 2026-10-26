@@ -7,9 +7,14 @@ package:
   version: 24.22.1
   channel: stable
   alias: nodejs
+  aliases:
+    - node
+    - npm
+    - npx
 locale:
   default: en-US
 tags:
   - developer
   - javascript
   - runtime
+  - npm
