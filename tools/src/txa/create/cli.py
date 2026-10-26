@@ -392,9 +392,10 @@ def _release_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = argparse.ArgumentParser(prog="txacreate", description="Publish installers to the TXA repository")
+    parser = argparse.ArgumentParser(prog="txacreate", description="Publish installers to the TXA repository",
+        epilog='examples:\n  txacreate login\n  txacreate new https://vendor.example/app-1.2.3-x64.exe\n  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n  txacreate hash setup.exe', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txacreate {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     p = sub.add_parser("login", help="authenticate with GitHub (Device Code Flow or PAT)")
     p.add_argument("--token", help="personal access token (prefer --with-token: flags end up in shell history)")
@@ -434,6 +435,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_validate)
 
     args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 0
     if args.command == "config" and args.action in ("get", "set", "unset") and not args.key:
         parser.error("config get/set/unset needs a key")
     if args.command == "config" and args.action == "set" and args.value is None:

@@ -138,10 +138,11 @@ def cmd_schema(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = argparse.ArgumentParser(prog="txaci", description="TXA 16-step manifest validator")
+    parser = argparse.ArgumentParser(prog="txaci", description="TXA 16-step manifest validator",
+        epilog='examples:\n  txaci validate manifests/t/TXAVL/HelloTool/1.4.2\n  txaci validate <folder> --offline\n  txaci schema build\n\ninit/step/verdict/gate are used by the GitHub bot.', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txaci {__version__}")
     parser.add_argument("--state", default=str(Context.default_state_dir()), help="pipeline state directory")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     p = sub.add_parser("init", help="collect the change set of a pull request")
     p.add_argument("--base", required=True)
@@ -183,6 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_schema)
 
     args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 0
     return args.func(args)
 
 

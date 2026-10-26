@@ -237,9 +237,10 @@ def _install_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = argparse.ArgumentParser(prog="txapm", description="TXA package manager")
+    parser = argparse.ArgumentParser(prog="txapm", description="TXA package manager",
+        epilog='examples:\n  txapm search notepad\n  txapm install TXAVL.HelloTool\n  txapm upgrade --all\n  txapm uninstall TXAVL.HelloTool', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txapm {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     p = sub.add_parser("install", aliases=["add"], help="download, verify and silently install a package")
     p.add_argument("package", help="package id (TXAVL.HelloTool) or alias")
@@ -285,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_import, download_only=False)
 
     args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 0
     try:
         return args.func(args)
     except (InstallError, NotFound, net.NetError) as exc:
