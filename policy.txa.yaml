@@ -1,0 +1,36 @@
+# TXA repository policy.
+#
+# txaci reads this file from the *base* commit of every pull request, so a PR can
+# never loosen the rules it is validated against. Changing it is an infra change
+# (admin review, no auto-merge).
+txa: 1
+kind: policy
+
+# Namespaces allowed as the first half of Namespace.AppName (STEP 03).
+namespaces:
+  - TXAVL
+
+limits:
+  max_payload_mb: 2048      # STEP 07 / 09 - hard cap on installer size
+  max_redirects: 8          # STEP 06 - longer chains are treated as loops
+  http_timeout_s: 30
+  max_line_length: 400      # STEP 02
+
+network:
+  # STEP 08 - geo probe. Each region is an EDNS Client Subnet hint: the DNS-over-HTTPS
+  # resolver answers as if the client sat in that network, so we reach the CDN edge
+  # that real users in that region would hit, then open a verified TLS connection to it.
+  min_regions_ok: 3
+  regions:
+    vn-hanoi: 113.160.0.0/24
+    sg-singapore: 203.116.0.0/24
+    jp-tokyo: 126.0.0.0/24
+    au-sydney: 1.120.0.0/24
+    de-frankfurt: 79.192.0.0/24
+    us-east: 73.0.0.0/24
+
+signature:
+  require: false            # STEP 10 - true makes unsigned installers fail instead of warn
+
+os:
+  floor: 10.0.17763         # STEP 13 - oldest Windows build TXA clients support

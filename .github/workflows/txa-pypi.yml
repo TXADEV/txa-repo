@@ -1,0 +1,64 @@
+# Publish tools/ to PyPI as `txa` (gives global txapm / txacreate / txaci via pipx or uv).
+# The PyPI API token lives only in the repository secret PYPI_API_TOKEN - never in a file:
+#   gh secret set PYPI_API_TOKEN --repo TXAVL/txa-repo
+name: TXA PyPI
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag must match txa.__version__
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(python -c "import re;print(re.search(r'__version__ = \"(.+?)\"', open('src/txa/__init__.py').read()).group(1))")
+          if [ "v$version" != "$TAG" ]; then echo "::error::tag $TAG != package version $version"; exit 1; fi
+
+      - name: Test
+        run: python -m pip install --disable-pip-version-check ".[dev]" && python -m pytest -q
+
+      - name: Build
+        run: python -m pip install build && python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: tools/dist/
+
+  publish:
+    name: Upload to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Require the PYPI_API_TOKEN secret
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$PYPI_API_TOKEN" ]; then echo "::error::secret PYPI_API_TOKEN is not set"; exit 1; fi
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TXAVL/txa-repo/main/tools/src/txa/schemas/about.schema.json
+# TXA about card - human text for one locale (add about.vi-VN.txa.yaml for Vietnamese).
+txa: 1
+kind: about
+ref: TXAVL.HelloTool@1.4.2
+lang: en-US
+name: Hello Tool
+publisher: TXA VL
+author: TXA Software Dev
+summary: A tiny command line tool that greets you.
+description: |-
+  Hello Tool prints a friendly greeting.
+  It exists to demonstrate the TXA manifest format.
+homepage: https://example.com/hellotool
+license:
+  name: MIT                 # SPDX id; Proprietary/Freeware need license.url
+  url: https://example.com/hellotool/LICENSE

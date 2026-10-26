@@ -1,0 +1,75 @@
+# TXA Gate - STEP 15 (triage + labels + txa/verified status) and STEP 16 (auto-merge gate).
+#
+# Triggered by workflow_run, so this file and the toolchain always come from the default
+# branch (tools/ included) - a pull request cannot alter them. The report produced by "TXA Validate" is
+# treated as untrusted input: the PR is re-identified by its head SHA and the list of
+# changed files is fetched again from the API.
+name: TXA Gate
+
+on:
+  workflow_run:
+    workflows: ["TXA Validate"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: txa-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  gate:
+    name: TXA gate · steps 15-16
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout default branch (trusted tools)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - name: Install trusted TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./tools
+
+      - name: Download validation report (untrusted)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: txa-report
+          path: ${{ runner.temp }}/txa-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: "STEP 15 · Automated Triage & Custom TXA Labeling"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: txaci gate triage --report "$RUNNER_TEMP/txa-report/report.json" --head-sha "$HEAD_SHA" --run-url "$RUN_URL"
+
+      - name: "STEP 16 · Auto-Merge Gate & Code Owner Review Lock"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Optional fine-grained PAT / GitHub App token. When set, the squash merge it
+          # arms counts as a real push and re-triggers "TXA Publish API" immediately.
+          TXA_MERGE_TOKEN: ${{ secrets.TXA_BOT_TOKEN }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: txaci gate merge --report "$RUNNER_TEMP/txa-report/report.json" --run-url "$RUN_URL"

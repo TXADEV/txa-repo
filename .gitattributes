@@ -1,0 +1,3 @@
+# TXA cards must be LF-only UTF-8 (STEP 01). Normalise on commit regardless of OS.
+* text=auto eol=lf
+*.yaml text eol=lf

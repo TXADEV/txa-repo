@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "txa"
+dynamic = ["version"]
+description = "TXA package manager toolchain: txapm (install), txacreate (publish), txaci (16-step validator)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "TXA Software Dev" }]
+dependencies = [
+  "PyYAML>=6.0",
+  "requests>=2.31",
+  "jsonschema>=4.20",
+  "olefile>=0.46",
+]
+
+[project.urls]
+Homepage = "https://github.com/TXAVL/txa-repo"
+Issues = "https://github.com/TXAVL/txa-repo/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6.6"]
+
+[project.scripts]
+txapm = "txa.pm.cli:main"
+txacreate = "txa.create.cli:main"
+txaci = "txa.ci.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "txa.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+txa = ["schemas/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

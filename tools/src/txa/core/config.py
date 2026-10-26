@@ -1,0 +1,71 @@
+"""User-level settings and local folders.
+
+Resolution order for every setting: ``TXA_<KEY>`` env var > ``config.json`` >
+value baked into the build > built-in default.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+from txa import constants
+
+_DEFAULTS = {
+    "upstream": lambda: constants.UPSTREAM_REPO,
+    "client_id": lambda: constants.GITHUB_CLIENT_ID,
+    "namespace": lambda: constants.DEFAULT_NAMESPACE,
+    "api": lambda: constants.API_BASE,
+}
+
+
+def txa_home() -> Path:
+    if os.environ.get("TXA_HOME"):
+        return Path(os.environ["TXA_HOME"])
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "TXA"
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "txa"
+
+
+def temp_root() -> Path:
+    """%TEMP%\\txa - where installers are downloaded before verification."""
+    path = Path(tempfile.gettempdir()) / "txa"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def config_path() -> Path:
+    return txa_home() / "config.json"
+
+
+def load_config() -> dict:
+    try:
+        return json.loads(config_path().read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", "utf-8")
+
+
+def get(key: str) -> str:
+    if key not in _DEFAULTS:
+        raise KeyError(f"unknown setting '{key}' (known: {', '.join(sorted(_DEFAULTS))})")
+    return os.environ.get(f"TXA_{key.upper()}") or load_config().get(key) or _DEFAULTS[key]()
+
+
+def api_base() -> str:
+    explicit = get("api")
+    if explicit:
+        return explicit.rstrip("/")
+    owner, repo = get("upstream").split("/", 1)
+    return f"https://{owner.lower()}.github.io/{repo}/{constants.API_NAMESPACE}"
+
+
+def keys() -> list[str]:
+    return sorted(_DEFAULTS)

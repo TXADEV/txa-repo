@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:txa:schema:v1:core",
+  "title": "TXA Core Card",
+  "description": "Identity of one package release: who it is, which version, which locale is primary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["txa", "kind", "package", "locale"],
+  "properties": {
+    "txa": { "const": 1, "description": "TXA manifest format revision." },
+    "kind": { "const": "core" },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]{1,39}\\.[A-Za-z0-9][A-Za-z0-9-]{0,63}$",
+          "description": "Namespace.AppName, e.g. TXAVL.HelloTool"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "Strict X.Y.Z"
+        },
+        "channel": { "enum": ["stable", "beta"], "default": "stable" },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,39}$",
+          "description": "Short name usable with `txapm install <alias>`."
+        }
+      }
+    },
+    "locale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2}|-[0-9]{3})?$" }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$" }
+    }
+  }
+}

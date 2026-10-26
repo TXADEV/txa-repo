@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TXAVL/txa-repo/main/tools/src/txa/schemas/core.schema.json
+# TXA core card - identity of one release.
+txa: 1                      # format revision
+kind: core
+package:
+  id: TXAVL.HelloTool       # Namespace.AppName - must match the folder path
+  version: 1.4.2            # strict X.Y.Z - must match the folder name
+  channel: stable           # stable | beta
+  alias: hellotool          # optional: `txapm install hellotool`
+locale:
+  default: en-US            # about.en-US.txa.yaml must exist
+tags:
+  - cli
+  - utility

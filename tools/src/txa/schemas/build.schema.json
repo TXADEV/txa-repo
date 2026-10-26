@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:txa:schema:v1:build",
+  "title": "TXA Build Card",
+  "description": "Downloadable binaries of one release, one entry per CPU architecture.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["txa", "kind", "ref", "platform", "targets"],
+  "properties": {
+    "txa": { "const": 1 },
+    "kind": { "const": "build" },
+    "ref": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]{1,39}\\.[A-Za-z0-9][A-Za-z0-9-]{0,63}@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "<id>@<version> of the core card this build belongs to."
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "min_build"],
+      "properties": {
+        "os": { "const": "windows" },
+        "min_build": {
+          "type": "string",
+          "pattern": "^[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4,5}$",
+          "description": "Lowest supported OS build, e.g. 10.0.17763"
+        }
+      }
+    },
+    "scope": { "enum": ["user", "machine"], "default": "machine" },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "url": { "type": "string", "maxLength": 2048, "pattern": "^https://[^\\s]+$" },
+    "switch": { "type": "string", "maxLength": 512 },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arch", "engine", "source"],
+      "properties": {
+        "arch": { "enum": ["x64", "x86", "arm64"] },
+        "engine": { "enum": ["inno", "nsis", "msi", "wix", "exe"] },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "sha256"],
+          "properties": {
+            "url": { "$ref": "#/$defs/url" },
+            "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+            "size": { "type": "integer", "minimum": 1 },
+            "mirrors": { "type": "array", "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/url" } }
+          }
+        },
+        "switches": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "silent": { "$ref": "#/$defs/switch" },
+            "progress": { "$ref": "#/$defs/switch" },
+            "custom": { "$ref": "#/$defs/switch" }
+          }
+        },
+        "success_codes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

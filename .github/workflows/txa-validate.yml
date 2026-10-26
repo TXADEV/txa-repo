@@ -1,0 +1,129 @@
+# TXA Validate - STEP 01..14 for every pull request.
+#
+# Runs with a read-only token (fork PRs never see secrets). The validator (tools/) is
+# installed from the PR's *base* commit, so a pull request cannot change the code it is
+# checked with. Results go to report.json, which "TXA Gate" (STEP 15-16) consumes.
+name: TXA Validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: txa-validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  validate:
+    name: TXA pipeline · steps 01-14
+    # Windows runner: STEP 10 verifies Authenticode against the real OS trust store.
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout trusted tools from the base commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .txa-trusted
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - name: Install trusted TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./.txa-trusted/tools
+
+      - name: Collect change set
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: txaci init --base $env:BASE_SHA --head $env:HEAD_SHA --pr $env:PR_NUMBER
+
+      - name: "STEP 01 · Character Encoding & BOM Sanity"
+        continue-on-error: true
+        run: txaci step 1
+
+      - name: "STEP 02 · Strict YAML Structure & Indentation Guard"
+        continue-on-error: true
+        run: txaci step 2
+
+      - name: "STEP 03 · Namespace & ID Naming Convention"
+        continue-on-error: true
+        run: txaci step 3
+
+      - name: "STEP 04 · Semantic Versioning & Upgrade Path Check"
+        continue-on-error: true
+        run: txaci step 4
+
+      - name: "STEP 05 · Localization & License Policy Audit"
+        continue-on-error: true
+        run: txaci step 5
+
+      - name: "STEP 06 · Secure Protocol & Redirect Loop Analysis"
+        continue-on-error: true
+        run: txaci step 6
+
+      - name: "STEP 07 · Payload Size Limit & Server Header Inspection"
+        continue-on-error: true
+        run: txaci step 7
+
+      - name: "STEP 08 · CDN Availability & Mirror Reachability"
+        continue-on-error: true
+        run: txaci step 8
+
+      - name: "STEP 09 · Binary Stream Integrity & Download Verification"
+        continue-on-error: true
+        run: txaci step 9
+
+      - name: "STEP 10 · Authenticode & Digital Certificate Verification"
+        continue-on-error: true
+        run: txaci step 10
+
+      - name: "STEP 11 · High-Precision SHA-256 Checksum Match"
+        continue-on-error: true
+        run: txaci step 11
+
+      - name: "STEP 12 · PE Binary Architecture & Installer Engine Detection"
+        continue-on-error: true
+        run: txaci step 12
+
+      - name: "STEP 13 · Windows OS Minimum Version Compatibility"
+        continue-on-error: true
+        run: txaci step 13
+
+      - name: "STEP 14 · Silent Install Command Switches Verification"
+        continue-on-error: true
+        run: txaci step 14
+
+      - name: Verdict
+        run: txaci verdict --report "$env:RUNNER_TEMP/txa-report/report.json"
+
+      - name: Upload report for TXA Gate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: txa-report
+          path: ${{ runner.temp }}/txa-report/report.json
+          retention-days: 7
+          if-no-files-found: warn

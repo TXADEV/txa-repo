@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TXAVL/txa-repo/main/tools/src/txa/schemas/build.schema.json
+# TXA build card - one entry per CPU architecture.
+txa: 1
+kind: build
+ref: TXAVL.HelloTool@1.4.2  # points back at the core card
+platform:
+  os: windows
+  min_build: 10.0.17763     # lowest supported Windows build (STEP 13)
+scope: machine              # machine -> txapm elevates, user -> no UAC prompt
+targets:
+  - arch: x64               # x64 | x86 | arm64
+    engine: inno            # inno | nsis | msi | wix | exe
+    source:
+      url: https://example.com/hellotool-1.4.2-x64.exe
+      sha256: 9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08
+      size: 5242880         # optional, cross-checked with Content-Length (STEP 07)
+      mirrors:              # optional, must serve identical bytes (STEP 08)
+        - https://mirror.example.net/hellotool-1.4.2-x64.exe
+    switches:               # optional for inno/nsis/msi/wix (TXA defaults), required for exe
+      silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+      progress: /SILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+      custom: /MERGETASKS=!desktopicon
+    success_codes:          # optional extra exit codes treated as success
+      - 0
+      - 3010

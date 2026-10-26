@@ -1,0 +1,13 @@
+# TXA core card
+txa: 1
+kind: core
+package:
+  id: TXAVL.HelloTool
+  version: 1.4.2
+  channel: stable
+  alias: hellotool
+locale:
+  default: en-US
+tags:
+  - cli
+  - utility

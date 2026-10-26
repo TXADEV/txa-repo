@@ -1,0 +1,16 @@
+txa: 1
+kind: build
+ref: TXAVL.HelloTool@1.4.2
+platform:
+  os: windows
+  min_build: 10.0.17763
+scope: machine
+targets:
+  - arch: x64
+    engine: inno
+    source:
+      url: https://example.com/hellotool-1.4.2-x64.exe
+      sha256: 9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08
+    switches:
+      silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+      progress: /SILENT /SUPPRESSMSGBOXES /NORESTART
