@@ -225,8 +225,15 @@ $protection = @'
   "required_conversation_resolution": true
 }
 '@
-$protection | gh api -X PUT "repos/$Manifest/branches/main/protection" --input - | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'branch protection failed (private repos need GitHub Pro/Team)' }
+# Windows PowerShell 5.1 re-encodes text piped into native programs, so hand gh a file.
+$protectionFile = Join-Path ([IO.Path]::GetTempPath()) 'txa-protection.json'
+[IO.File]::WriteAllText($protectionFile, $protection)
+try {
+    gh api -X PUT "repos/$Manifest/branches/main/protection" --input $protectionFile | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'branch protection failed (private repos need GitHub Pro/Team)' }
+} finally {
+    Remove-Item -LiteralPath $protectionFile -ErrorAction SilentlyContinue
+}
 Write-Host '   required: status txa/verified + 1 code-owner approval; squash auto-merge waits for both'
 
 # ---------------------------------------------------------------------------- next steps
