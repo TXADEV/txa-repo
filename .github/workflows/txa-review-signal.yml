@@ -1,0 +1,18 @@
+# TXA Review Signal - does nothing but exist.
+#
+# A review submitted on a pull request from a fork runs with a read-only token, so it cannot change
+# labels itself. This empty workflow only announces "a review happened"; "TXA Lifecycle" reacts to
+# its completion (workflow_run) with a write token and updates the labels.
+name: TXA Review Signal
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "a review was ${{ github.event.action }} - TXA Lifecycle will refresh the labels"

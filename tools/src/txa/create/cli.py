@@ -24,7 +24,7 @@ from txa.ci.report import build_report, quick_check, render_console, run_live
 from txa.core import config, console, credentials, engines, licenses, net, semver, winos
 from txa.core.github import GitHub, GitHubError, device_flow
 from txa.core.manifest import ManifestError, split_id
-from txa.create.draft import Draft, TargetDraft, guess_arch, name_from_filename, pascal
+from txa.create.draft import Draft, TargetDraft, guess_arch, known_arch, name_from_filename, pascal
 
 MAX_DOWNLOAD = 4 * 1024 * 1024 * 1024
 
@@ -161,6 +161,53 @@ def _ask_until(prompt: str, default: str | None, check=None) -> str:
         console.say(f"    ✗ {problem}")
 
 
+ENGINE_NAMES = {
+    "inno": "Inno Setup installer", "nsis": "NSIS (Nullsoft) installer", "msi": "Windows Installer (.msi)",
+    "wix": "WiX Burn bundle", "exe": "generic .exe installer", "portable": "portable ZIP (unpacked, not installed)",
+}
+
+
+def _describe_installer(dl, found, engine: str, arch: str) -> None:
+    """What kind of file this is, how TXA will run it, and for which CPU - in plain words."""
+    paint = console.paint
+    print(f"  {paint(dl.path.name, 'bold')}  {dl.bytes / 1048576:.2f} MiB")
+    print(f"    {console.label('SHA-256', 11)}{paint(dl.sha256, 'gray')}")
+    print(f"    {console.label('type', 11)}{paint(ENGINE_NAMES.get(engine, engine), 'magenta', 'bold')}")
+    if engine == "portable":
+        spec = found.portable or {}
+        print(f"    {console.label('install', 11)}unpacked into the TXA apps folder, PATH gets: {', '.join(spec.get('path', [])) or '-'}")
+    else:
+        switches = engines.DEFAULT_SWITCHES.get(engine, {}).get("silent")
+        print(f"    {console.label('silent', 11)}{paint(switches, 'cyan') if switches else paint('you must give --silent', 'yellow')}")
+    wrapper = ""
+    if found.machine and found.machine != arch and found.format == "pe":
+        wrapper = paint(f"  (the installer program itself is {found.machine}, that is normal)", "gray")
+    print(f"    {console.label('CPU', 11)}{paint(arch, 'yellow', 'bold')}{wrapper}")
+
+
+def _ask_arch(file_name: str, engine: str) -> str:
+    """A 32-bit installer program says nothing about the software it installs - ask instead of guessing."""
+    print(f"\n  {console.paint(file_name, 'bold')} is a 32-bit installer program. Many 64-bit apps ship like this, "
+          f"so TXA cannot tell which CPU the software is built for.")
+    print(f"    {console.paint('x86', 'yellow', 'bold')}    32-bit software (runs on every PC)")
+    print(f"    {console.paint('x64', 'yellow', 'bold')}    64-bit Intel/AMD software")
+    print(f"    {console.paint('arm64', 'yellow', 'bold')}  Windows on ARM software")
+    return _ask_until("CPU the software is built for", "x64",
+                      lambda v: None if v in ("x86", "x64", "arm64") else "type x86, x64 or arm64")
+
+
+def _open_pull_request(url: str, args) -> None:
+    """Open the new pull request in the default browser (skip with --no-browser)."""
+    if getattr(args, "no_browser", False):
+        return
+    try:
+        opened = webbrowser.open(url)
+    except webbrowser.Error:
+        opened = False
+    console.say(f"→ {'opening the pull request in your browser' if opened else 'open this link in your browser'}"
+                f"{'' if opened else ': ' + console.paint(url, 'cyan', 'bold')}")
+
+
 def _license_menu() -> str:
     """Numbered list of the usual licenses; a name typed instead of a number is understood too."""
     paint = console.paint
@@ -237,13 +284,16 @@ def cmd_new(args) -> int:
             return _die(str(exc))
         console.done_line()
         found = engines.inspect(dl.path)
-        arch = arches[index] or guess_arch(dl.path.name, found)
         engine = engine_overrides[index] or found.engine
         if not engine:
             return _die(f"{dl.path.name}: unsupported payload ({found.label}); pass --engine")
-        print(f"  {console.paint(dl.path.name, 'bold')}: {dl.bytes:,} bytes · SHA-256 {console.paint(dl.sha256, 'gray')}")
-        print(f"  {found.label} · installer CPU {found.machine or '-'} → arch {console.paint(arch, 'yellow', 'bold')}, "
-              f"engine {console.paint(engine, 'magenta', 'bold')}")
+        arch = arches[index] or known_arch(dl.path.name, found)
+        if arch is None:
+            if found.machine == "x86" and interactive:
+                arch = _ask_arch(dl.path.name, engine)
+            else:
+                arch = guess_arch(dl.path.name, found)
+        _describe_installer(dl, found, engine, arch)
         analysed.append((url, dl, found, arch, engine))
     seen = [a[3] for a in analysed]
     if len(set(seen)) != len(seen):
@@ -408,6 +458,7 @@ def cmd_new(args) -> int:
     except GitHubError as exc:
         return _die(str(exc))
     console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
+    _open_pull_request(result.url, args)
     print(console.paint(f"  branch {result.head_repo}@{result.branch} · the TXA Bot will now run its 16 steps", "gray"))
     return 0
 
@@ -522,6 +573,7 @@ def cmd_submit(args) -> int:
     result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
                     direct=args.direct)
     console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
+    _open_pull_request(result.url, args)
     return 0
 
 
@@ -578,6 +630,7 @@ def _release_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--offline", action="store_true", help="skip network checks in the pre-flight")
     p.add_argument("--no-validate", action="store_true", help="skip the quick check of the cards")
     p.add_argument("--check", action="store_true", help="run all 14 bot checks locally (slow: downloads, CDN, signature)")
+    p.add_argument("--no-browser", action="store_true", help="do not open the pull request in the browser")
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="open the PR even if pre-flight fails or a PR exists")
     p.add_argument("-y", "--yes", action="store_true", help="never prompt; fail on missing fields")
@@ -620,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--offline", action="store_true", help="skip network checks in the validation")
     p.add_argument("--no-validate", action="store_true")
     p.add_argument("--check", action="store_true", help="run all 14 bot checks locally instead of the quick check")
+    p.add_argument("--no-browser", action="store_true", help="do not open the pull request in the browser")
     p.add_argument("--direct", action="store_true", help="branch in upstream instead of a fork (needs push rights)")
     p.add_argument("--force", action="store_true", help="submit even if validation fails or a PR exists")
     p.add_argument("-t", "--token", help="GitHub personal access token for this run")

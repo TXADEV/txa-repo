@@ -112,7 +112,17 @@ def cmd_gate(args) -> int:
     if args.action == "triage":
         if not args.head_sha:
             raise SystemExit("txaci gate triage: --head-sha is required")
-        return gate.triage(gh, repo, report, args.head_sha, state, args.run_url)
+        return gate.triage(gh, repo, report, args.head_sha, state, args.run_url, args.run_id)
+    if args.action == "progress":
+        from txa.ci import progress
+
+        if not (args.pr and args.head_sha):
+            raise SystemExit("txaci gate progress: --pr and --head-sha are required")
+        return progress.watch(gh, repo, args.pr, args.head_sha)
+    if args.action == "lifecycle":
+        if not (args.pr or args.head_sha):
+            raise SystemExit("txaci gate lifecycle: --pr or --head-sha is required")
+        return gate.lifecycle(gh, repo, pr_number=args.pr, head_sha=args.head_sha, closed=args.closed, merged=args.merged)
     merger = GitHub(os.environ.get("TXA_MERGE_TOKEN") or token)
     return gate.merge_gate(gh, merger, repo, state, report, args.run_url)
 
@@ -164,12 +174,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", help="also write the report to this file")
     p.set_defaults(func=cmd_validate)
 
-    p = sub.add_parser("gate", help="STEP 15 triage / STEP 16 merge gate (trusted workflow only)")
-    p.add_argument("action", choices=["triage", "merge"])
+    p = sub.add_parser("gate", help="trusted workflows only: triage (STEP 15), merge (STEP 16), progress, lifecycle")
+    p.add_argument("action", choices=["triage", "merge", "progress", "lifecycle"])
     p.add_argument("--report")
     p.add_argument("--head-sha")
     p.add_argument("--repo")
     p.add_argument("--run-url")
+    p.add_argument("--run-id", type=int, help="triage: id of the Validate run, for per-step timings")
+    p.add_argument("--pr", type=int, help="progress / lifecycle: pull request number")
+    p.add_argument("--closed", action="store_true", help="lifecycle: the pull request was closed")
+    p.add_argument("--merged", action="store_true", help="lifecycle: ... by merging")
     p.set_defaults(func=cmd_gate)
 
     p = sub.add_parser("build-api", help="generate the static txa.v1 JSON API")

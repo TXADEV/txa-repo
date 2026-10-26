@@ -11,6 +11,7 @@ from the default branch) treats that report as untrusted input:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from txa.ci.report import render_markdown
@@ -44,7 +45,7 @@ def _find_pr(gh: GitHub, repo: str, head_sha: str) -> dict | None:
 
 
 def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state_path: Path,
-           run_url: str | None = None) -> int:
+           run_url: str | None = None, run_id: int | None = None) -> int:
     """STEP 15 - decide labels, publish the report comment and the txa/verified status."""
     report = load_report(report_path)
     pr = None
@@ -81,14 +82,16 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         wanted.add(_label("infra"))
     removal_only = modes == {"removal"}
 
+    # a moderator may have approved while the checks were still running
+    review_label = _label("approved") if review_decision(gh, repo, number) == "APPROVED" else _label("review")
     if verdict == "pass" and not mixed:
-        wanted.add(_label("review"))
+        wanted.add(review_label)
         if not removal_only:
             wanted.add(_label("verified"))
         state, description = "success", (
             "Removal - waiting for moderator" if removal_only else "All automated TXA checks passed")
     elif verdict == "infra":
-        wanted.add(_label("review"))
+        wanted.add(review_label)
         state, description = "success", "No manifest changes - admin code-owner review required"
     elif mixed:
         wanted.add(_label("fix"))
@@ -103,10 +106,16 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         state, description = "error", reason or "validation did not complete"
 
     current = {label["name"] for label in pr.get("labels", [])}
-    for stale in sorted((current & MANAGED) - wanted):
-        gh.delete(f"repos/{repo}/issues/{number}/labels/{stale}", ok=(404,))
-    if wanted - current:
-        gh.post(f"repos/{repo}/issues/{number}/labels", json={"labels": sorted(wanted - current)})
+    set_labels(gh, repo, number, current, add=wanted, remove=MANAGED)
+
+    timings: dict[str, float] = {}
+    if run_id:
+        from txa.ci.progress import step_timings  # imported late: progress depends on this module
+
+        try:
+            timings = {str(n): round(t, 1) for n, t in step_timings(gh, repo, run_id).items()}
+        except GitHubError as exc:
+            print(f"::warning::could not read step timings ({exc})")
 
     gh.post(f"repos/{repo}/statuses/{head_sha}", json={
         "state": state, "context": STATUS_CONTEXT, "description": description[:140],
@@ -116,7 +125,7 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
     eligible = state == "success" and verdict == "pass" and not outside and not removal_only and not pr.get("draft")
     gate = {
         "pr": number, "head": head_sha, "verdict": verdict, "eligible": eligible, "labels": sorted(wanted),
-        "why": description,
+        "why": description, "timings": timings,
         "step15": {"status": "PASS" if state == "success" else "FAIL",
                    "detail": f"labels: {', '.join(sorted(wanted)) or '-'} · status {STATUS_CONTEXT}={state}"},
         "step16": {"status": "PENDING", "detail": "evaluating merge gate"},
@@ -228,8 +237,108 @@ def _upsert_comment(gh: GitHub, repo: str, number: int, report: dict | None, gat
                 f"report ({reason}). Push a new commit or ask a moderator to re-run the workflow.\n")
     else:
         body = render_markdown(report, gate, run_url)
+    upsert_bot_comment(gh, repo, number, body)
+
+
+# --------------------------------------------------------------------------- shared helpers
+
+
+def upsert_bot_comment(gh: GitHub, repo: str, number: int, body: str) -> None:
+    """Create the bot's single comment on a PR, or edit it in place (only comments written by a bot count)."""
     for comment in gh.paginate(f"repos/{repo}/issues/{number}/comments"):
         if comment["body"].startswith(REPORT_MARKER) and comment["user"]["type"] == "Bot":
-            gh.patch(f"repos/{repo}/issues/comments/{comment['id']}", json={"body": body})
+            if comment["body"] != body:
+                gh.patch(f"repos/{repo}/issues/comments/{comment['id']}", json={"body": body})
             return
     gh.post(f"repos/{repo}/issues/{number}/comments", json={"body": body})
+
+
+def set_labels(gh: GitHub, repo: str, number: int, current: set[str], add: set[str], remove: set[str]) -> None:
+    """Bring a PR's labels to ``current - remove + add`` with the fewest API calls."""
+    for stale in sorted((current & remove) - add):
+        gh.delete(f"repos/{repo}/issues/{number}/labels/{stale}", ok=(404,))
+    missing = add - current
+    if missing:
+        gh.post(f"repos/{repo}/issues/{number}/labels", json={"labels": sorted(missing)})
+
+
+def review_decision(gh: GitHub, repo: str, number: int) -> str | None:
+    owner, name = repo.split("/", 1)
+    try:
+        pr = gh.graphql(_PR_QUERY, {"owner": owner, "name": name, "number": number})["repository"]["pullRequest"]
+    except GitHubError:
+        return None
+    return pr["reviewDecision"]
+
+
+# --------------------------------------------------------------------------- lifecycle (after the checks)
+
+_MERGED_MARK = "<!-- txa-bot:merged -->"
+_RELEASE_RE = re.compile(r"^manifests/[a-z0-9]/([A-Za-z0-9]+)/([A-Za-z0-9-]+)/(\d+\.\d+\.\d+)/")
+
+
+def lifecycle(gh: GitHub, repo: str, *, pr_number: int | None = None, head_sha: str | None = None,
+              closed: bool = False, merged: bool = False) -> int:
+    """Keep the labels honest after validation: approved -> published, never 'awaiting review' forever.
+
+    open PR     a code owner approved           ->  txa:awaiting-review becomes txa:approved
+                changes were requested          ->  txa:fix-required
+                approval withdrawn              ->  back to txa:awaiting-review
+    merged PR   all in-flight labels go, txa:published is added, the bot comment says how to install
+    closed PR   in-flight labels go
+    """
+    if pr_number is not None:
+        prs = [gh.get(f"repos/{repo}/pulls/{pr_number}")]
+    else:
+        found = _find_pr(gh, repo, head_sha) if head_sha else None
+        # a review event does not always carry the PR head, so fall back to refreshing every open PR
+        prs = [found] if found else list(gh.paginate(f"repos/{repo}/pulls", {"state": "open"}))
+    for pr in prs:
+        _refresh(gh, repo, pr, closed, merged)
+    return 0
+
+
+def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> None:
+    number = pr["number"]
+    current = {label["name"] for label in pr.get("labels", [])}
+    names = {key: _label(key) for key in ("validating", "verified", "fix", "review", "approved", "published")}
+    in_flight = {names[k] for k in ("validating", "fix", "review", "approved")}
+    if closed:
+        add = {names["published"]} if merged else set()
+        set_labels(gh, repo, number, current, add=add, remove=in_flight)
+        _footer(gh, repo, pr, merged)
+        print(f"lifecycle: PR #{number} {'merged' if merged else 'closed'}; labels {sorted((current - in_flight) | add)}")
+        return
+    if names["validating"] in current or not current & {names["verified"], names["review"], names["approved"]}:
+        return  # still being validated (or never reached the gate): the gate owns the labels
+    decision = review_decision(gh, repo, number)
+    if decision == "APPROVED":
+        add, remove = {names["approved"]}, {names["review"], names["fix"]}
+    elif decision == "CHANGES_REQUESTED":
+        add, remove = {names["fix"]}, {names["review"], names["approved"]}
+    else:
+        add, remove = {names["review"]}, {names["approved"]}
+    set_labels(gh, repo, number, current, add=add, remove=remove)
+    print(f"lifecycle: PR #{number} decision={decision} -> {sorted(add)}")
+
+
+def _footer(gh: GitHub, repo: str, pr: dict, merged: bool) -> None:
+    """Tell the contributor what happened, in the bot's own comment."""
+    number = pr["number"]
+    releases = sorted({m.groups() for f in gh.paginate(f"repos/{repo}/pulls/{number}/files")
+                       if (m := _RELEASE_RE.match(f["filename"]))})
+    for comment in gh.paginate(f"repos/{repo}/issues/{number}/comments"):
+        if comment["body"].startswith(REPORT_MARKER) and comment["user"]["type"] == "Bot":
+            body = comment["body"].split("\n---\n" + _MERGED_MARK)[0].rstrip("\n")
+            if merged and releases:
+                lines = [f"`{ns}.{app} {ver}`" for ns, app, ver in releases]
+                install = "\n".join(f"txapm install {ns}.{app}" for ns, app, _ in releases)
+                note = (f"🎉 **Merged.** {', '.join(lines)} is in the repository. The package index refreshes within "
+                        f"about two minutes; then anyone can run:\n\n```powershell\n{install}\n```")
+            elif merged:
+                note = "🎉 **Merged.**"
+            else:
+                note = "🚪 **Closed without merging.** Open a new pull request when the issues are fixed."
+            gh.patch(f"repos/{repo}/issues/comments/{comment['id']}",
+                     json={"body": f"{body}\n\n---\n{_MERGED_MARK}\n{note}\n"})
+            return

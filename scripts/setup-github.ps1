@@ -169,9 +169,12 @@ $labels = @(
     @('txa:new-version', '0e8a16', 'New version of an existing package'),
     @('txa:manifest-update', 'c5def5', 'Edits an already published version'),
     @('txa:removal', 'b60205', 'Removes a published version'),
+    @('txa:validating', 'bfd4f2', 'The TXA bot is running its checks right now'),
     @('txa:verified-build', '2ea44f', 'All automated TXA checks passed'),
     @('txa:fix-required', 'd93f0b', 'At least one automated TXA check failed'),
     @('txa:awaiting-review', 'fbca04', 'Waiting for a TXA moderator to approve'),
+    @('txa:approved', '0e8a16', 'A code owner approved - merges as soon as the checks are green'),
+    @('txa:published', '6f42c1', 'Merged - available through txapm after the index refresh'),
     @('txa:infra-change', '5319e7', 'Touches files outside manifests/ - admin review only')
 )
 foreach ($label in $labels) {

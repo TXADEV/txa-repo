@@ -63,7 +63,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
-        run: txaci gate triage --report "$RUNNER_TEMP/txa-report/report.json" --head-sha "$HEAD_SHA" --run-url "$RUN_URL"
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: txaci gate triage --report "$RUNNER_TEMP/txa-report/report.json" --head-sha "$HEAD_SHA" --run-url "$RUN_URL" --run-id "$RUN_ID"
 
       - name: "STEP 16 · Auto-Merge Gate & Code Owner Review Lock"
         env:

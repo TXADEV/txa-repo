@@ -51,52 +51,105 @@ def _cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def _short(text: str, limit: int = 150) -> str:
+    text = _cell(text)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _took(timings: dict | None, number: int) -> str:
+    seconds = (timings or {}).get(str(number))
+    if seconds is None:
+        return ""
+    return f"{seconds:.1f}s" if seconds < 60 else f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
+
+
+_ENGINE_LABELS = {
+    "inno": "Inno Setup", "nsis": "NSIS (Nullsoft)", "msi": "Windows Installer (.msi)", "wix": "WiX Burn bundle",
+    "exe": "generic .exe", "portable": "portable ZIP",
+}
+
+
+def _installer_rows(report: dict, target: dict) -> list[str]:
+    """One table row per architecture: what the file is, how big, its hash and signature."""
+    from urllib.parse import urlsplit
+
+    rows = []
+    for key, art in sorted((report.get("artifacts") or {}).items()):
+        path, _, arch = key.partition("#")
+        if path != target["path"] or not art.get("sha256"):
+            continue
+        inspection = art.get("inspection") or {}
+        signature = art.get("signature") or {}
+        if inspection.get("engine") == "portable":
+            sign = "n/a (archive)"
+        elif signature.get("status") == "valid":
+            sign = f"✅ {_cell(str(signature.get('signer') or 'signed'))}"
+        elif signature.get("status") == "unsigned":
+            sign = "⚠️ unsigned"
+        else:
+            sign = signature.get("status", "n/a")
+        engine = inspection.get("engine") or "?"
+        size = f"{art['bytes'] / 1048576:.2f} MiB" if art.get("bytes") else "?"
+        host = urlsplit(art.get("final_url") or "").hostname or ""
+        rows.append(f"| `{arch}` | {_ENGINE_LABELS.get(engine, engine)} (`{engine}`) | {size} | {sign} | "
+                    f"`{art['sha256'][:16]}…` | {host} |")
+    return rows
+
+
 def render_markdown(report: dict, gate: dict | None = None, run_url: str | None = None) -> str:
-    lines = [REPORT_MARKER, "## 🤖 TXA Bot · Validation Report", ""]
+    timings = (gate or {}).get("timings")
     verdict = report.get("verdict")
+    headline = {
+        "pass": "✅ All automated checks passed",
+        "fail": "❌ Fix required",
+        "infra": "🛠️ Infrastructure change",
+        "empty": "ℹ️ Nothing to validate",
+    }.get(verdict, str(verdict))
+    lines = [REPORT_MARKER, "## 🤖 TXA Bot · Validation Report", "", f"**{headline}**", ""]
     if verdict == "infra":
         lines += ["This pull request changes no manifests. It touches:", ""]
         lines += [f"- `{p}`" for p in report.get("outside", [])[:30]]
-        lines += ["", "> Infrastructure changes skip the automated checks and need an **admin** code-owner review."]
+        lines += ["", "> Infrastructure changes skip the automated checks and need an **admin** code-owner review.", ""]
     for target in report.get("targets", []):
         rows = [r for r in report.get("results", []) if r["target"] == target["path"]]
         by_step = {r["step"]: r for r in rows}
-        lines += [f"### 📦 `{target['path']}`", "", f"Mode: **{target['mode']}**", "",
-                  "| # | Check | Result | Details |", "|---|---|---|---|"]
+        lines += [f"### 📦 `{target['path']}`  ·  {target['mode']}", ""]
+        installers = _installer_rows(report, target)
+        if installers:
+            lines += ["| CPU | Installer type | Size | Signature | SHA-256 | Downloaded from |", "|---|---|---|---|---|---|", *installers, ""]
+        lines += ["| # | Check | Result | Time | Summary |", "|---|---|---|---|---|"]
         for number, title in TITLES.items():
             row = by_step.get(number)
             if number >= 15:
                 status = (gate or {}).get(f"step{number}", {}).get("status", "PENDING")
-                detail = (gate or {}).get(f"step{number}", {}).get("detail", "runs in the trusted TXA Gate workflow")
+                summary = _short((gate or {}).get(f"step{number}", {}).get("detail", "runs in the trusted TXA Gate workflow"), 220)
             elif row is None:
-                status, detail = "SKIP", "not run"
+                status, summary = "SKIP", "not run"
             else:
                 status = row["status"]
                 messages = sorted(row["messages"], key=lambda m: _ORDER.get(m["level"], 9))
-                detail = "<br>".join(_cell(m["text"]) for m in messages[:3])
-                if len(messages) > 3:
-                    detail += f"<br>… +{len(messages) - 3} more"
-            lines.append(f"| {number:02d} | {title} | {ICONS.get(status, status)} {status} | {detail} |")
+                summary = _short(messages[0]["text"]) if messages else ""
+                if len(messages) > 1:
+                    summary += f" _(+{len(messages) - 1} more below)_"
+            lines.append(f"| {number:02d} | {title} | {ICONS.get(status, status)} {status} | {_took(timings, number)} | {summary} |")
         lines.append("")
-        verbose = [r for r in rows if len(r["messages"]) > 3]
-        if verbose:
-            lines += ["<details><summary>Full findings</summary>", ""]
-            for row in verbose:
-                lines.append(f"**STEP {row['step']:02d} · {TITLES[row['step']]}**")
-                lines += [f"- `{m['level']}` {m['text']}" for m in row["messages"]]
-                lines.append("")
-            lines += ["</details>", ""]
+        lines += ["<details><summary>📋 Full output of every check</summary>", ""]
+        for number in range(1, 15):
+            row = by_step.get(number)
+            if row is None:
+                continue
+            took = _took(timings, number)
+            lines.append(f"**STEP {number:02d} · {TITLES[number]}** — {ICONS.get(row['status'], '')} {row['status']}"
+                         f"{' · ' + took if took else ''}")
+            ordered = sorted(row["messages"], key=lambda m: _ORDER.get(m["level"], 9))
+            lines += [f"- `{m['level']}` {m['text']}" for m in ordered] or ["- _nothing to report_"]
+            lines.append("")
+        lines += ["</details>", ""]
     if report.get("targets") and report.get("outside"):
         lines += ["> ❌ Manifest changes are mixed with files outside `manifests/` - split them into separate PRs.", ""]
-    summary = {
-        "pass": "✅ **All automated checks passed.**",
-        "fail": "❌ **Fix required** - see the failing steps above, push a new commit and the bot re-runs.",
-        "infra": "🛠️ **Infrastructure change** - admin review required.",
-        "empty": "ℹ️ Nothing to validate.",
-    }.get(verdict, verdict)
-    lines.append(summary)
+    if verdict == "fail":
+        lines += ["Fix the failing checks, push a new commit and the bot starts over automatically.", ""]
     if gate and gate.get("labels"):
-        lines.append("")
         lines.append("Labels: " + " ".join(f"`{label}`" for label in gate["labels"]))
     if run_url:
         lines += ["", f"<sub>[Workflow run]({run_url}) · {report.get('tool')} · head `{(report.get('head') or '')[:12]}`</sub>"]

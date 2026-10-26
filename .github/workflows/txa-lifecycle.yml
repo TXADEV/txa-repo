@@ -1,0 +1,60 @@
+# TXA Lifecycle - keeps the labels truthful after the checks are done.
+#
+#   review submitted / dismissed  ->  awaiting-review <-> approved / fix-required
+#   pull request merged           ->  in-flight labels removed, txa:published added, install hint
+#   pull request closed           ->  in-flight labels removed
+#
+# Both triggers run trusted default-branch code and never check out the pull request.
+name: TXA Lifecycle
+
+on:
+  workflow_run:
+    workflows: ["TXA Review Signal"]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: txa-lifecycle-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  labels:
+    name: labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install trusted TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./tools
+
+      - name: Pull request closed or merged
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          if [ "$MERGED" = "true" ]; then flag="--merged"; else flag=""; fi
+          txaci gate lifecycle --pr "$PR_NUMBER" --closed $flag
+
+      - name: A review changed
+        if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: txaci gate lifecycle --head-sha "$HEAD_SHA"

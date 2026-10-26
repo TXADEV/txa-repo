@@ -19,14 +19,19 @@ _ARCH_HINTS = [
 ]
 
 
-def guess_arch(filename: str, found: engines.Inspection) -> str:
+def known_arch(filename: str, found: engines.Inspection) -> str | None:
+    """The CPU the software targets when the file itself says so (MSI/ZIP contents, or the file name)."""
     if found.payload_arch:
         return found.payload_arch
     lowered = filename.lower()
     for arch, pattern in _ARCH_HINTS:
         if re.search(rf"(?<![a-z0-9])(?:{pattern})(?![a-z0-9])", lowered):
             return arch
-    return found.machine if found.machine in ("x64", "x86", "arm64") else "x64"
+    return None
+
+
+def guess_arch(filename: str, found: engines.Inspection) -> str:
+    return known_arch(filename, found) or (found.machine if found.machine in ("x64", "x86", "arm64") else "x64")
 
 
 def name_from_filename(filename: str) -> str:

@@ -34,8 +34,11 @@ LABELS = {
     "new_version": ("txa:new-version", "0e8a16", "New version of an existing package"),
     "update": ("txa:manifest-update", "c5def5", "Edits an already published version"),
     "removal": ("txa:removal", "b60205", "Removes a published version"),
+    "validating": ("txa:validating", "bfd4f2", "The TXA bot is running its checks right now"),
     "verified": ("txa:verified-build", "2ea44f", "All automated TXA checks passed"),
     "fix": ("txa:fix-required", "d93f0b", "At least one automated TXA check failed"),
     "review": ("txa:awaiting-review", "fbca04", "Waiting for a TXA moderator to approve"),
+    "approved": ("txa:approved", "0e8a16", "A code owner approved - merges as soon as the checks are green"),
+    "published": ("txa:published", "6f42c1", "Merged - available through txapm after the index refresh"),
     "infra": ("txa:infra-change", "5319e7", "Touches files outside manifests/ - admin review only"),
 }

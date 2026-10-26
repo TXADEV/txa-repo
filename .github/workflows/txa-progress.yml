@@ -1,0 +1,47 @@
+# TXA Progress - the live checklist on a pull request.
+#
+# Runs on pull_request_target: default-branch code with a write token. It NEVER checks out or
+# executes anything from the pull request - it only reads the Actions API about the unprivileged
+# "TXA Validate" run and keeps the bot's comment current. The final report comes from "TXA Gate".
+name: TXA Progress
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: txa-progress-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: live progress
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # pull_request_target checks out the *base* branch by default - exactly what we want here.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install trusted TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./tools
+
+      - name: Follow the validation run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: txaci gate progress --pr "$PR_NUMBER" --head-sha "$HEAD_SHA"
