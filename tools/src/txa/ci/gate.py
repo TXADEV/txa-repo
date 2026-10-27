@@ -118,6 +118,9 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
     if open_boxes and state == "success":
         wanted.add(_label("confirm"))
         state, description = "pending", f"Waiting for the contributor to tick {len(open_boxes)} checklist box(es)"
+    if not agreed or open_boxes:
+        # not ready for a moderator yet: only the "needs ..." label may show, never "awaiting review"
+        wanted -= {_label("review"), _label("approved")}
 
     current = {label["name"] for label in pr.get("labels", [])}
     set_labels(gh, repo, number, current, add=wanted, remove=MANAGED)
@@ -376,6 +379,10 @@ def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> Non
     if names["validating"] in current or not current & {names["verified"], names["review"], names["approved"]}:
         return  # still being validated (or never reached the gate): the gate owns the labels
     current = _sync_confirmation(gh, repo, pr, current, names)
+    if current & {names["confirm"], names["agree"]}:
+        set_labels(gh, repo, number, current, add=set(), remove={names["review"], names["approved"]})
+        print(f"lifecycle: PR #{number} still waiting for the contributor - no review label")
+        return
     decision = review_decision(gh, repo, number)
     if decision == "APPROVED":
         add, remove = {names["approved"]}, {names["review"], names["fix"]}
