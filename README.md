@@ -221,6 +221,8 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 | `txacreate token --clear` | quên quyền đã lưu (đăng xuất) |
 | `txacreate new <link> -t <PAT>` | dùng Personal Access Token cho lần này, không lưu (hoặc đặt biến `TXA_TOKEN`) |
 
+Chủ kho muốn bot hiện tên riêng (`txa-repo[bot]`) thay vì `github-actions` thì làm theo [docs/github-app.md](docs/github-app.md).
+
 ### Sau khi gửi Pull Request
 
 **Việc đầu tiên sau khi tạo PR là chấp nhận Contributor Agreement (EULA).** Bot comment ngay: *"This PR cannot be merged
