@@ -240,7 +240,7 @@ until you accept the Contributor Agreement"*. Bạn trả lời đúng một com
 ```
 
 Bot tự **xoá comment đó**, đánh dấu bước này là đã xong (`✅ Contributor Agreement accepted`) và bỏ nhãn
-`txa:needs-agreement`. Chưa chấp nhận thì PR không thể gộp. Chỉ comment của chính người mở PR mới có hiệu lực. Thay mặt công ty thì ghi `@txa-repo agree company="Tên công ty"`.
+`txa:needs-agreement`. **Bot chưa chạy bước nào cho tới khi bạn chấp nhận**: 14 bước kiểm tra, bảng tiến trình và 16 check chỉ bắt đầu sau khi bạn comment `@txa-repo agree`. Chưa chấp nhận thì PR không thể gộp. Chỉ comment của chính người mở PR mới có hiệu lực. Thay mặt công ty thì ghi `@txa-repo agree company="Tên công ty"`.
 Chỉ cần chấp nhận **một lần**: người đã có PR được gộp, và maintainer của repo, được bot nhận ra tự động. Bước này hiện thành status `txa/agreement` trong khung merge.
 
 Mô tả của PR có một **checklist bạn tự tick**: đã đọc hướng dẫn, không có PR trùng, chỉ sửa một manifest,

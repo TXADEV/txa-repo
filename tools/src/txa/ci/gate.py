@@ -58,6 +58,12 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         print(f"::notice::no open pull request has head {head_sha[:12]} (superseded by a newer push?) - nothing to do")
         return 0
     number = pr["number"]
+    from txa.ci import agreement
+
+    if not agreement.is_signed(gh, repo, pr):
+        # the Contributor Agreement comes first: no labels, no report, no steps until the author signs
+        print(f"::notice::PR #{number} has not accepted the Contributor Agreement yet - the 16 steps start after it")
+        return 0
     files = [f["filename"] for f in gh.paginate(f"repos/{repo}/pulls/{number}/files")]
     outside = sorted(f for f in files if not f.startswith("manifests/"))
     touches_manifests = any(f.startswith("manifests/") for f in files)
@@ -105,13 +111,7 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
         wanted.add(_label("fix"))
         state, description = "error", reason or "validation did not complete"
 
-    # first of all: the Contributor Agreement - until the author accepts it nothing may merge
-    from txa.ci import agreement
-
-    agreed = agreement.is_signed(gh, repo, pr)
-    if not agreed and state == "success":
-        wanted.add(_label("agree"))
-        state, description = "pending", "Waiting for the contributor to accept the agreement"
+    agreed = True  # triage only gets here once the agreement is signed
 
     # the contributor must tick the checklist in the description; until then nothing may merge
     open_boxes = checklist(pr.get("body"))

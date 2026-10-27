@@ -21,8 +21,38 @@ env:
   PYTHONUTF8: "1"
 
 jobs:
+  agreement:
+    # The Contributor Agreement comes first: the 14 steps only start once the author has accepted it.
+    # (Enforcement is in "TXA Gate", which re-checks this with a trusted token; this job just saves the run.)
+    name: contributor agreement
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      signed: ${{ steps.check.outputs.signed }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          count=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate             --jq '.[] | select(.user.type == "Bot" and (.body | startswith("<!-- txa-bot:agreement signed=" + env.AUTHOR + " -->"))) | .id' | wc -l)
+          if [ "$count" -gt 0 ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::waiting for the author to accept the Contributor Agreement (comment: @txa-repo agree)"
+          fi
+
   validate:
     name: TXA pipeline · steps 01-14
+    needs: agreement
+    if: needs.agreement.outputs.signed == 'true'
     # Windows runner: STEP 10 verifies Authenticode against the real OS trust store.
     runs-on: windows-latest
     timeout-minutes: 45

@@ -197,6 +197,11 @@ def watch(gh: GitHub, repo: str, number: int, head_sha: str, *, timeout: float =
     """Post the checklist now, then keep it current until the validation run completes."""
     started = clock()
     pr = gh.get(f"repos/{repo}/pulls/{number}")
+    from txa.ci import agreement
+
+    if not agreement.is_signed(gh, repo, pr):
+        print(f"::notice::PR #{number}: waiting for the Contributor Agreement - the checklist starts once it is accepted")
+        return 0
     current = {label["name"] for label in pr.get("labels", [])}
     health = pipeline_health(gh, repo)
     try:

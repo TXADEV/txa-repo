@@ -120,12 +120,18 @@ def process(gh: GitHub, repo: str, number: int, comment_id: int | None = None) -
 
 
 def _rerun_gate(gh: GitHub, repo: str, pr: dict) -> None:
-    """If the checks already finished while the agreement was open, run them again so the gate re-decides."""
+    """The agreement is signed: now the 16 steps may start (re-run a skipped validation, start the live checklist)."""
     from txa.ci.progress import find_validate_run
 
+    sha = pr["head"]["sha"]
     try:
-        run = find_validate_run(gh, repo, pr["head"]["sha"])
+        run = find_validate_run(gh, repo, sha)
         if run and run.get("status") == "completed":
             gh.post(f"repos/{repo}/actions/runs/{run['id']}/rerun")
     except GitHubError as exc:
         print(f"::warning::could not re-run the checks ({exc})")
+    try:
+        gh.post(f"repos/{repo}/actions/workflows/txa-progress.yml/dispatches",
+                json={"ref": pr["base"]["ref"], "inputs": {"pr": str(pr["number"]), "sha": sha}})
+    except GitHubError as exc:
+        print(f"::warning::could not start the live checklist ({exc})")

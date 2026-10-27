@@ -8,6 +8,14 @@ name: TXA Progress
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:         # started by "TXA Agreement" the moment the author accepts it
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+      sha:
+        description: Head commit of the pull request
+        required: true
 
 permissions:
   contents: read
@@ -17,13 +25,13 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: txa-progress-${{ github.event.pull_request.number }}
+  group: txa-progress-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
 
 jobs:
   watch:
     name: live progress
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     env:
       APP_ID: ${{ secrets.TXA_APP_ID }}
@@ -53,6 +61,6 @@ jobs:
       - name: Follow the validation run
         env:
           GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.sha }}
         run: txaci gate progress --pr "$PR_NUMBER" --head-sha "$HEAD_SHA"
