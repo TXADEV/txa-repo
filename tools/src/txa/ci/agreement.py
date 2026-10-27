@@ -85,6 +85,9 @@ def process(gh: GitHub, repo: str, number: int, comment_id: int | None = None) -
     current = {label["name"] for label in pr.get("labels", [])}
     bot = find(gh, repo, number)
     signed = _is_signed_comment(bot, author)
+    if signed:
+        print(f"agreement: PR #{number} already accepted - nothing to do")  # any other comment must not restart the checks
+        return 0
     how, company = "", ""
     if not signed and pr.get("author_association") in EXEMPT:
         signed, how = True, "maintainer, exempt"
