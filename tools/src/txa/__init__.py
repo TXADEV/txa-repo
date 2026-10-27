@@ -1,3 +1,3 @@
 """TXA package manager toolchain."""
 
-__version__ = "1.0.16"
+__version__ = "1.1.0"

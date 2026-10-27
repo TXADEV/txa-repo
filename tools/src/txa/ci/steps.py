@@ -603,8 +603,19 @@ def download(ctx: Context, target: dict, out: Outcome) -> None:
 # =========================================================================== 10
 
 
+_NOISE = {"corporation", "corp", "limited", "ltd", "company", "co", "inc", "llc", "software", "technologies", "gmbh", "jsc"}
+
+
 def _tokens(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) >= 4 and t not in {"corporation", "limited", "company", "software", "technologies"}}
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) >= 3 and t not in _NOISE}
+
+
+def _resembles(publisher: str, signer: str) -> bool:
+    """Same company name, ignoring case, spacing and legal suffixes ("Coc Coc Co., Ltd." ~ "Coc Coc Company Limited")."""
+    squash = lambda text: "".join(sorted_tokens(text))  # noqa: E731
+    sorted_tokens = lambda text: [t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _NOISE]  # noqa: E731
+    one, two = squash(publisher), squash(signer)
+    return bool(one and two and (one in two or two in one)) or bool(_tokens(publisher) & _tokens(signer))
 
 
 @step(10)
@@ -629,7 +640,7 @@ def authenticode(ctx: Context, target: dict, out: Outcome) -> None:
         if sig.status == "valid":
             stamp = "timestamped" if sig.timestamped else "NOT timestamped"
             out.ok(f"[{arch}] valid signature by '{sig.signer_cn}' ({stamp}, verified via {sig.engine})")
-            if publisher and sig.signer_cn and not _tokens(publisher) & _tokens(sig.signer_cn):
+            if publisher and sig.signer_cn and not _resembles(publisher, sig.signer_cn):
                 out.warn(f"[{arch}] signer '{sig.signer_cn}' does not resemble publisher '{publisher}'")
             if not sig.timestamped:
                 out.warn(f"[{arch}] signature is not timestamped - it becomes invalid when the certificate expires")

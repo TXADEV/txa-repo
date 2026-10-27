@@ -11,12 +11,11 @@ on:
   push:
     branches: [main]
     paths: ["manifests/**", "policy.txa.yaml"]
-  # the "waiting for review" list follows the pull requests: refresh it when the bot finishes or a PR changes
+  # the "waiting for review" list follows the pull requests: refresh it when the bot finishes or a PR is closed.
+  # (workflow_run, not pull_request_target: a PR event would stick a "deployed to github-pages" box on the PR page)
   workflow_run:
-    workflows: ["TXA Gate", "TXA Lifecycle"]
+    workflows: ["TXA Agreement", "TXA Gate", "TXA Lifecycle"]
     types: [completed]
-  pull_request_target:
-    types: [opened, reopened, closed, ready_for_review, converted_to_draft]
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
