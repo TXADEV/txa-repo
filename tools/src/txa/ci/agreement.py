@@ -19,7 +19,7 @@ PHRASE = "@txa-repo agree"
 _PHRASE_RE = re.compile(r'^\s*@?txa-repo\s+agree(?:\s+company\s*=\s*"([^"\r\n]{1,80})")?\s*[.!]?\s*$', re.I)
 LABEL = LABELS["agree"][0]
 CONTEXT = "txa/agreement"
-EXEMPT = {"OWNER", "MEMBER", "COLLABORATOR"}
+EXEMPT = {"MEMBER", "COLLABORATOR"}  # repository owners sign like everybody else
 
 
 def _text(login: str) -> str:
@@ -57,12 +57,12 @@ def is_signed(gh: GitHub, repo: str, pr: dict) -> bool:
 
 
 def _returning(gh: GitHub, repo: str, login: str) -> bool:
-    """Someone whose pull request was already merged has accepted the agreement before."""
+    """Someone who accepted the agreement on a pull request that was merged has signed once for good."""
     try:
-        data = gh.get("search/issues", params={"q": f"repo:{repo} is:pr is:merged author:{login}", "per_page": 1})
+        data = gh.get("search/issues", params={"q": f"repo:{repo} is:pr is:merged author:{login}", "per_page": 5})
+        return any(_is_signed_comment(find(gh, repo, item["number"]), login) for item in data.get("items", []))
     except GitHubError:
         return False
-    return data.get("total_count", 0) > 0
 
 
 def _set_status(gh: GitHub, repo: str, pr: dict, signed: bool) -> None:

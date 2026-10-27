@@ -185,8 +185,6 @@ def render_markdown(report: dict, gate: dict | None = None, run_url: str | None 
         lines += [confirm_note(gate["confirm"]), ""]
     if verdict in ("pass", "infra") and LABELS["approved"][0] in labels:
         lines += ["> ✅ **A code owner approved this pull request** - it merges as soon as every check is green.", ""]
-    elif verdict in ("pass", "infra") and LABELS["review"][0] in labels:
-        lines += [WAIT_FOR_MODERATOR, ""]
     if gate and gate.get("labels"):
         lines.append("Labels: " + " ".join(f"`{label}`" for label in gate["labels"]))
     if run_url:

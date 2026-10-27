@@ -124,6 +124,8 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
 
     current = {label["name"] for label in pr.get("labels", [])}
     set_labels(gh, repo, number, current, add=wanted, remove=MANAGED)
+    if _label("review") in wanted:
+        post_moderator_note(gh, repo, number)
 
     from txa.ci.progress import pipeline_health, step_timings  # imported late: progress depends on this module
 
@@ -301,6 +303,20 @@ def upsert_bot_comment(gh: GitHub, repo: str, number: int, body: str) -> None:
     gh.post(f"repos/{repo}/issues/{number}/comments", json={"body": body})
 
 
+_MODERATOR_MARK = "<!-- txa-bot:moderator -->"
+
+
+def post_moderator_note(gh: GitHub, repo: str, number: int) -> None:
+    """One separate comment, once: the community check-in policy (a moderator has to approve)."""
+    for comment in gh.paginate(f"repos/{repo}/issues/{number}/comments"):
+        if comment["body"].startswith(_MODERATOR_MARK) and comment["user"]["type"] == "Bot":
+            return
+    gh.post(f"repos/{repo}/issues/{number}/comments", json={"body": (
+        f"{_MODERATOR_MARK}\nThe check-in policy requires a moderator (code owner) to approve pull requests from the community.\n\n"
+        "Our moderators are community volunteers, please be patient and allow them sufficient time to review your submission. "
+        "Nothing is published before they approve.\n\n<sub>Template: txabot/requiresApproval/moderator</sub>")})
+
+
 def set_labels(gh: GitHub, repo: str, number: int, current: set[str], add: set[str], remove: set[str]) -> None:
     """Bring a PR's labels to ``current - remove + add`` with the fewest API calls."""
     for stale in sorted((current & remove) - add):
@@ -390,6 +406,7 @@ def _refresh(gh: GitHub, repo: str, pr: dict, closed: bool, merged: bool) -> Non
         add, remove = {names["fix"]}, {names["review"], names["approved"]}
     else:
         add, remove = {names["review"]}, {names["approved"]}
+        post_moderator_note(gh, repo, number)
     set_labels(gh, repo, number, current, add=add, remove=remove)
     print(f"lifecycle: PR #{number} decision={decision} -> {sorted(add)}")
 

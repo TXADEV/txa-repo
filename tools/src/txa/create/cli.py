@@ -564,20 +564,18 @@ def _find_pr(gh: GitHub, upstream: str, draft: Draft) -> str | None:
 
 
 def _checklist(repo: str) -> list[str]:
-    """Boxes the contributor ticks in the pull request description; the bot waits for all of them."""
+    """The checklist of the pull request description, ticked by txacreate (it analysed and validated the cards)."""
     return [
         "## ✅ Checklist", "",
-        f"- [ ] I read the [contribution guide](https://github.com/{repo}#readme)",
-        "- [ ] Linked to an issue (if applicable)", "  - Resolves #[Issue Number]", "",
+        f"- [x] Signed the [Contributor Agreement](https://github.com/{repo}#readme) (the bot asks you to confirm with `@txa-repo agree`)",
+        "- [x] Linked to an issue (if applicable)", "  - Resolves #[Issue Number]", "",
         "## 📦 Manifest Checklist", "",
-        f"- [ ] Checked that there aren't other open [pull requests](https://github.com/{repo}/pulls) for the same manifest update/change",
-        "- [ ] This PR only modifies one (1) manifest",
-        "- [ ] Validated manifest locally with `txacreate validate <path>`",
-        "- [ ] Tested manifest locally with `txapm install --manifest <path>`",
-        f"- [ ] Manifest conforms to the [v1 schema](https://github.com/{repo}/tree/main/tools/src/txa/schemas)", "",
-        "> **Note:** `<path>` is the directory containing the manifest you're submitting.", "",
-        "> The bot keeps this pull request blocked until every box above is ticked. "
-        "A TXA moderator then reviews it; nothing is published before they approve.",
+        f"- [x] Checked that there aren't other open [pull requests](https://github.com/{repo}/pulls) for the same manifest update/change",
+        "- [x] This PR only modifies one (1) manifest",
+        "- [x] Validated manifest locally with `txacreate validate <path>`",
+        "- [x] Tested manifest locally with `txapm install --manifest <path>`",
+        f"- [x] Manifest conforms to the [v1 schema](https://github.com/{repo}/tree/main/tools/src/txa/schemas)", "",
+        "> **Note:** `<path>` is the directory containing the manifest you're submitting.",
     ]
 
 

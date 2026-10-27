@@ -6,7 +6,7 @@
 
 ## ✅ Checklist
 
-- [ ] I read the [contribution guide](https://github.com/TXAVL/txa-repo#readme)
+- [ ] Signed the [Contributor Agreement](https://github.com/TXAVL/txa-repo#readme) (the bot asks you to confirm with `@txa-repo agree`)
 - [ ] Linked to an issue (if applicable)
   - Resolves #[Issue Number]
 
