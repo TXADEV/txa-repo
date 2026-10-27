@@ -27,14 +27,12 @@ irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1 | iex
 Script tải bản mới nhất, kiểm tra SHA-256, cài vào `%LOCALAPPDATA%\TXA` và tự thêm vào PATH.
 Mở cửa sổ terminal mới là dùng được.
 
-Chọn **ngôn ngữ mặc định** (mã locale như `vi-VN`, `en-US`) cho file manifest do `txacreate` tạo:
+Script **hỏi ngôn ngữ trước khi bắt đầu cài** (English / Tiếng Việt, Enter = theo ngôn ngữ Windows) và in mọi
+thông báo, bảng lệnh bằng ngôn ngữ đã chọn. Bỏ qua câu hỏi (cài tự động) bằng `-Lang en` / `-Lang vi` hoặc biến `TXA_LANG`:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1))) -Lang vi-VN
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1))) -Lang vi
 ```
-
-Không ghi `-Lang` thì lần cài đầu lấy theo ngôn ngữ hiển thị của Windows, các lần sau giữ giá trị đã lưu
-(`config.json`). Dùng riêng cho một lệnh: đặt biến `TXA_LANG` hoặc `txacreate new <link> --lang vi-VN`.
 
 ### Cách 2 — pipx (nếu đã có Python 3.10+)
 

@@ -18,7 +18,6 @@ _DEFAULTS = {
     "client_id": lambda: constants.GITHUB_CLIENT_ID,
     "namespace": lambda: constants.DEFAULT_NAMESPACE,
     "api": lambda: constants.API_BASE,
-    "lang": lambda: "en-US",  # default locale of the about card written by txacreate
 }
 
 
