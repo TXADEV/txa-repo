@@ -89,7 +89,8 @@ def triage(gh: GitHub, repo: str, report_path: Path | None, head_sha: str, state
     removal_only = modes == {"removal"}
 
     # a moderator may have approved while the checks were still running
-    review_label = _label("approved") if review_decision(gh, repo, number) == "APPROVED" else _label("review")
+    decision = review_decision(gh, repo, number)
+    review_label = {"APPROVED": _label("approved"), "CHANGES_REQUESTED": _label("fix")}.get(decision, _label("review"))
     if verdict == "pass" and not mixed:
         wanted.add(review_label)
         if not removal_only:
