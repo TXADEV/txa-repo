@@ -48,7 +48,7 @@ _WAITING = {
     "approved": "approved and about to be merged - it appears in the library in a few minutes",
     "validating": "the automatic checks are still running",
     "needs-confirmation": "the author has not yet ticked the pull request checklist",
-    "fix-required": "the automatic checks failed and the author has to fix the pull request",
+    "fix-required": "changes are needed (a check failed or a moderator asked for changes) - the author has to update the pull request",
 }
 
 
@@ -59,7 +59,7 @@ def _waiting_text(entry: dict) -> str:
 def _refuse_pending(source: Source, entry: dict) -> int:
     safe = console.safe
     console.error("txapm", f"{safe(entry['id'])} {safe(entry['version'])} cannot be installed yet - {_waiting_text(entry)}.")
-    console.say(f"  {console.label('pull request')}{P(safe(entry['url']), 'cyan')}  (#{safe(entry['pr'])}, by {safe(entry.get('by', '?'))})")
+    console.say(f"  {console.label('pull request', 14)}{P(safe(entry['url']), 'cyan')}  (#{safe(entry['pr'])}, by {safe(entry.get('by', '?'))})")
     console.say("  A package is installable only after a Contributor approves its pull request and it is merged into the library.")
     return 1
 
@@ -523,7 +523,7 @@ def _show_waiting(source: Source, entry: dict) -> None:
         print(f"  {safe(entry['summary'])}")
     print(f"  {console.label('publisher')}{safe(entry.get('publisher') or '?')}   {P('submitted by', 'gray')} {safe(entry.get('by', '?'))}")
     print(f"  {console.label('status')}{_waiting_text(entry)}")
-    print(f"  {console.label('pull request')}{P(safe(entry['url']), 'cyan')}")
+    print(f"  {console.label('pull request', 14)}{P(safe(entry['url']), 'cyan')}")
     console.say("! it cannot be installed until a Contributor approves the pull request")
 
 
