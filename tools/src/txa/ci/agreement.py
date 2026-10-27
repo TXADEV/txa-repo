@@ -113,7 +113,8 @@ def process(gh: GitHub, repo: str, number: int, comment_id: int | None = None) -
         return 0
     if not bot:
         gh.post(f"repos/{repo}/issues/{number}/comments", json={"body": _text(author)})
-    set_labels(gh, repo, number, current, add={LABEL}, remove=set())
+    stale = {LABELS[key][0] for key in ("validating", "verified", "fix", "review", "approved", "confirm")}
+    set_labels(gh, repo, number, current, add={LABEL}, remove=stale)  # nothing but "needs agreement" until it is signed
     _set_status(gh, repo, pr, False)
     print(f"agreement: PR #{number} waiting for {author}")
     return 0
