@@ -304,7 +304,7 @@ def _initial_draft(args, items: list[Item], previous: dict, github: dict | None,
     draft = Draft(
         package_id=args.id or f"{namespace}.{pascal(name)}",
         version=version,
-        lang=args.lang or prev_lang or "en-US",
+        lang=args.lang or prev_lang or config.get("lang"),
         channel=args.channel or prev_package.get("channel", "stable"),
         alias=typed_names[0] if typed_names else prev_package.get("alias"),
         aliases=typed_names[1:] if typed_names else prev_package.get("aliases", []),
@@ -714,7 +714,7 @@ def _release_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--homepage")
     p.add_argument("--license")
     p.add_argument("--license-url")
-    p.add_argument("--lang", help="default locale (default en-US)")
+    p.add_argument("--lang", help="default locale (default: the `lang` setting, en-US unless changed)")
     p.add_argument("--alias", help="short name(s) for txapm, comma separated: node,npm")
     p.add_argument("--strip", type=int, help="portable ZIP: leading folders to drop (default: detected)")
     p.add_argument("--path", help="portable ZIP: folder(s) to add to PATH, comma separated (default: detected)")

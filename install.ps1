@@ -11,7 +11,13 @@
 
         & ([scriptblock]::Create((irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1))) -Version 1.0.0
 
-    Environment overrides (useful with the iex form): TXA_VERSION, TXA_HOME, TXA_REPO.
+    Default language (locale tag such as en-US or vi-VN) used by txacreate for new manifests:
+
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/TXAVL/txa-repo/main/install.ps1))) -Lang vi-VN
+
+    Without -Lang the language already saved is kept; on a first install it follows the Windows display language.
+
+    Environment overrides (useful with the iex form): TXA_VERSION, TXA_HOME, TXA_REPO, TXA_LANG.
 
     Layout created under %LOCALAPPDATA%\TXA (or TXA_HOME):
         bin\      txapm.exe, txacreate.exe   (added to the user PATH)
@@ -24,6 +30,7 @@ param(
     [string]$Version = $(if ($env:TXA_VERSION) { $env:TXA_VERSION } else { 'latest' }),
     [string]$InstallDir = $(if ($env:TXA_HOME) { $env:TXA_HOME } else { Join-Path $env:LOCALAPPDATA 'TXA' }),
     [string]$Repo = $(if ($env:TXA_REPO) { $env:TXA_REPO } else { 'TXAVL/txa-repo' }),
+    [string]$Lang = $env:TXA_LANG,
     [switch]$NoPath,
     [switch]$Uninstall
 )
@@ -54,6 +61,10 @@ if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
 }
 
 $BinDir = Join-Path $InstallDir 'bin'
+
+if ($Lang -and $Lang -notmatch '^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$') {
+    throw "Invalid -Lang '$Lang' - use a language tag such as en-US or vi-VN."
+}
 
 # ------------------------------------------------------------------ uninstall
 if ($Uninstall) {
@@ -158,6 +169,22 @@ if (-not $NoPath) {
 # Setting a user variable broadcasts WM_SETTINGCHANGE, so new terminals pick up PATH too.
 [Environment]::SetEnvironmentVariable('TXA_HOME', $InstallDir, 'User')
 $env:TXA_HOME = $InstallDir
+
+# ------------------------------------------------------------------ default language
+$configFile = Join-Path $InstallDir 'config.json'
+$config = [ordered]@{}
+if (Test-Path -LiteralPath $configFile) {
+    try { (Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $config[$_.Name] = $_.Value } } catch { }
+}
+if (-not $Lang -and -not $config.Contains('lang')) {
+    $ui = (Get-UICulture).Name
+    $Lang = if ($ui -match '^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$') { $ui } else { 'en-US' }
+}
+if ($Lang) {
+    $config['lang'] = $Lang
+    [IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Write-Done "Default language: $Lang (change it: run this installer again with -Lang, or set TXA_LANG for one command)"
+}
 
 $installed = & (Join-Path $BinDir 'txapm.exe') --version
 Write-Done "$installed is ready"
