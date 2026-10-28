@@ -246,7 +246,11 @@ def _parse_winget_table(stdout: str) -> list[dict[str, str]]:
     id_col = header.find("Id")
     ver_col = header.find("Version")
     avail_col = header.find("Available")
+    match_col = header.find("Match")
     src_col = header.find("Source")
+
+    after_ver_cols = [c for c in (avail_col, match_col, src_col) if c > ver_col]
+    end_ver_col = min(after_ver_cols) if after_ver_cols else -1
 
     rows: list[dict[str, str]] = []
     for line in lines[header_idx + 2:]:
@@ -254,12 +258,45 @@ def _parse_winget_table(stdout: str) -> list[dict[str, str]]:
             continue
         name = line[:id_col].strip()
         pkg_id = line[id_col:ver_col].strip() if ver_col > id_col else line[id_col:].strip()
-        end_ver = avail_col if avail_col > ver_col else (src_col if src_col > ver_col else len(line))
+        end_ver = end_ver_col if end_ver_col != -1 else len(line)
         version = line[ver_col:end_ver].strip() if ver_col != -1 else ""
         source = line[src_col:].strip() if src_col != -1 and len(line) > src_col else ""
         if name and pkg_id:
             rows.append({"name": name, "id": pkg_id, "version": version, "source": source})
     return rows
+
+
+def search_winget(query: str, limit: int = 15) -> list[dict[str, str]]:
+    """Search WinGet for matching packages by keyword or PackageIdentifier."""
+    q = query.strip()
+    if not q:
+        return []
+
+    # 1. Standard general search (searches Name, Id, Moniker, Tags)
+    for candidate in ([q] + ([clean_query_name(q)] if clean_query_name(q).lower() != q.lower() else [])):
+        if not candidate:
+            continue
+        cmd = ["winget", "search", candidate, "-s", "winget", "--disable-interactivity", "--nowarn"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            rows = _parse_winget_table(res.stdout)
+            if rows:
+                return rows[:limit]
+        except Exception:
+            pass
+
+    # 2. Fallback: search explicitly by --id if query contains a dot
+    if "." in q and " " not in q:
+        cmd = ["winget", "search", "--id", q, "-s", "winget", "--disable-interactivity", "--nowarn"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=20)
+            rows = _parse_winget_table(res.stdout)
+            if rows:
+                return rows[:limit]
+        except Exception:
+            pass
+
+    return []
 
 
 def resolve_to_winget_id(query: str) -> str | None:

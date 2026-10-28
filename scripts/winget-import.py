@@ -251,16 +251,25 @@ def main() -> None:
 
     # Search mode
     if args.search:
-        wg_id = wg.resolve_to_winget_id(args.search)
-        print(f"\nBest match for '{console.paint(args.search, 'cyan')}': {console.paint(wg_id or 'none', 'green', 'bold')}")
+        print(f"\nSearching WinGet for '{console.paint(args.search, 'cyan')}'...")
+        results = wg.search_winget(args.search)
+        if not results:
+            print(console.paint("No packages found.", "yellow"))
+            return
+        print(f"\nFound {len(results)} package(s):")
+        print(f"  {'Id':<42} {'Version':<16} {'Name'}")
+        print("  " + "-" * 78)
+        for r in results:
+            print(f"  {r['id']:<42} {r['version']:<16} {r['name']}")
+        print(f"\nTo import a package, run:\n  .\\scripts\\winget-import.ps1 {results[0]['id']}")
         return
 
     queries = list(args.packages)
     if args.from_installed:
-        print(f"\nScanning installed programs on this PC not yet in TXA…")
+        print("\nScanning installed programs on this PC not yet in TXA...")
         untracked = wg.scan_installed_winget_packages()
         if not untracked:
-            print(console.paint("✓ All detected WinGet programs on this machine are already in TXA!", "green"))
+            print(console.paint("[+] All detected WinGet programs on this machine are already in TXA!", "green"))
             return
         print(f"\nFound {len(untracked)} installed program(s) available on WinGet:")
         print(f"{'#':<4} {'Installed Name':<38} {'WinGet Id':<36} {'Version'}")
