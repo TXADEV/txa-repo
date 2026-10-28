@@ -227,15 +227,21 @@ $releaseUrl = if ($Version -eq 'latest') {
     "https://api.github.com/repos/$Repo/releases/tags/v$($Version.TrimStart('v'))"
 }
 Write-Step (T 'lookup' $Version, $Repo)
-$release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
-
-$asset = $release.assets | Where-Object { $_.name -eq "txa-windows-$arch.zip" } | Select-Object -First 1
-if (-not $asset -and $arch -eq 'arm64') {
-    Write-Host (T 'noArm') -ForegroundColor Yellow
-    $arch = 'x64'
-    $asset = $release.assets | Where-Object { $_.name -eq 'txa-windows-x64.zip' } | Select-Object -First 1
+$release = $null
+$asset = $null
+$sums = $null
+for ($attempt = 1; $attempt -le 4; $attempt++) {
+    $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
+    $asset = $release.assets | Where-Object { $_.name -eq "txa-windows-$arch.zip" } | Select-Object -First 1
+    if (-not $asset -and $arch -eq 'arm64') {
+        Write-Host (T 'noArm') -ForegroundColor Yellow
+        $arch = 'x64'
+        $asset = $release.assets | Where-Object { $_.name -eq 'txa-windows-x64.zip' } | Select-Object -First 1
+    }
+    $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
+    if ($asset -and $sums) { break }
+    if ($attempt -lt 4) { Start-Sleep -Seconds 3 }
 }
-$sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
 if (-not $asset -or -not $sums) { throw (T 'missingAsset' $release.tag_name, $arch) }
 
 # ------------------------------------------------------------------ download + verify
