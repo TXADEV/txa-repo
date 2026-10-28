@@ -168,12 +168,13 @@ ENGINE_NAMES = {
 }
 
 
-def _describe_installer(dl, found, engine: str, arch: str) -> None:
+def _describe_installer(dl, found, engine: str, arch: str, display_name: str | None = None) -> None:
     """What kind of file this is, how TXA will run it, and for which CPU - in plain words."""
     from txa.core import i18n
 
     paint = console.paint
-    print(f"  {paint(dl.path.name, 'bold')}  {dl.bytes / 1048576:.2f} MiB")
+    fname = display_name or dl.path.name
+    print(f"  {paint(fname, 'bold')}  {dl.bytes / 1048576:.2f} MiB")
     print(f"    {console.label('SHA-256', 11)}{paint(dl.sha256, 'gray')}")
     print(f"    {console.label('type', 11)}{paint(i18n.tr(ENGINE_NAMES.get(engine, engine)), 'magenta', 'bold')}")
     if engine == "portable":
@@ -266,9 +267,10 @@ def _download_all(args, guided: bool) -> list[Item] | None:
         if not engine:
             _die(f"{dl.path.name}: unsupported payload ({found.label}); pass --engine")
             return None
-        known = arches[index] or known_arch(dl.path.name, found)
-        arch = known or guess_arch(dl.path.name, found)
-        _describe_installer(dl, found, engine, arch)
+        orig_name = Path(url.split("?")[0].rstrip("/")).name or dl.path.name
+        known = arches[index] or known_arch(orig_name, found)
+        arch = known or guess_arch(orig_name, found)
+        _describe_installer(dl, found, engine, arch, display_name=orig_name)
         item = Item(url, dl, found, engine, arch, arch_known=bool(known),
                     mirrors=list(args.mirror or []) if len(args.urls) == 1 else [])
         if engine == "portable":

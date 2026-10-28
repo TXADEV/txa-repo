@@ -81,9 +81,11 @@ def _check_names(value: str) -> str | None:
 
 def ask_arch(item: Item) -> str:
     values = [o.value for o in ARCHES]
-    options = [console.Option(o.value, o.label, o.note + ("  <- detected from the file" if item.arch_known and o.value == item.arch else ""))
+    cur_arch = (item.arch or "x64").lower()
+    options = [console.Option(o.value, o.label, o.note + ("  <- detected from the file" if item.arch_known and o.value == cur_arch else ""))
                for o in ARCHES]
-    return console.choose("The installer target architecture", "Architecture", options, values.index(item.arch) if item.arch in values else 0).value
+    default_idx = values.index(cur_arch) if cur_arch in values else 0
+    return console.choose("The installer target architecture", "Architecture", options, default_idx).value
 
 
 def ask_license(draft: Draft) -> None:
