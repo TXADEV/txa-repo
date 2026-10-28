@@ -103,7 +103,8 @@ def head(text: str) -> str:
 def label(text: str, width: int = 11) -> str:
     from txa.core import i18n
 
-    return paint(f"{i18n.translate(text):<{width}}", "gray")
+    t = i18n.translate(text)
+    return paint(f"{t:<{max(width, len(t) + 2)}}", "gray")
 
 
 def status(name: str) -> str:

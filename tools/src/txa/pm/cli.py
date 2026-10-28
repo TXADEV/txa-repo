@@ -39,8 +39,19 @@ def _die(message: str) -> int:
     return 1
 
 
-def _about(cards: dict) -> dict:
-    return cards["about"].get(cards["core"]["locale"]["default"]) or next(iter(cards["about"].values()))
+def _about(cards: dict, package_id: str = "") -> dict:
+    from txa.core import i18n
+
+    abouts = cards.get("about") or {}
+    default_loc = (cards.get("core") or {}).get("locale", {}).get("default")
+    if i18n.is_vi():
+        chosen = abouts.get("vi-VN") or abouts.get("vi") or abouts.get(default_loc) or next(iter(abouts.values()))
+    else:
+        chosen = abouts.get("en-US") or abouts.get("en") or abouts.get(default_loc) or next(iter(abouts.values()))
+    result = dict(chosen)
+    summaries_map = {loc: ab.get("summary", "") for loc, ab in abouts.items() if isinstance(ab, dict) and ab.get("summary")}
+    result["summary"] = i18n.localize_summary(package_id, result.get("summary", ""), summaries_map)
+    return result
 
 
 def _pick(args, query: str) -> tuple[Source, str]:
@@ -545,11 +556,13 @@ def cmd_validate(args) -> int:
 
 
 def _show_waiting(source: Source, entry: dict) -> None:
+    from txa.core import i18n
+
     safe = console.safe
     print(f"{P(safe(entry['name']), 'bold', 'cyan')} {P(safe(entry['version']), 'yellow', 'bold')}  {P('(' + safe(entry['id']) + ')', 'gray')}"
           f"  {P('[source: ' + source.name + ']', 'magenta')}  {P('WAITING FOR REVIEW', 'yellow', 'bold')}")
     if entry.get("summary"):
-        print(f"  {safe(entry['summary'])}")
+        print(f"  {safe(i18n.localize_summary(entry.get('id', ''), entry['summary']))}")
     print(f"  {console.label('publisher')}{safe(entry.get('publisher') or '?')}   {P('submitted by', 'gray')} {safe(entry.get('by', '?'))}")
     print(f"  {console.label('status')}{_waiting_text(entry)}")
     print(f"  {console.label('pull request', 14)}{P(safe(entry['url']), 'cyan')}")
@@ -566,7 +579,7 @@ def cmd_show(args) -> int:
             raise
         _show_waiting(*waiting)
         return 0
-    build, about = cards["build"], _about(cards)
+    build, about = cards["build"], _about(cards, package_id)
     if args.versions:
         print("\n".join(P(v, "green") for v in src.versions(package_id)))
         return 0
@@ -612,10 +625,13 @@ def cmd_search(args) -> int:
         return 1
     safe = console.safe
     if hits:
+        from txa.core import i18n
+
         width = max(len(h["id"]) for _, h in hits)
         print(console.head(f"{'Id':<{width}}  {'Version':<10} {'Source':<10} Summary"))
         for source, hit in hits:
-            print(f"{C(safe(hit['id']), width, 'bold')}  {C(safe(hit['latest']), 10, 'green')} {C(source.name, 10, 'magenta')} {safe(hit['summary'])}")
+            loc_summary = i18n.localize_summary(hit["id"], hit.get("summary", ""), hit.get("summaries"))
+            print(f"{C(safe(hit['id']), width, 'bold')}  {C(safe(hit['latest']), 10, 'green')} {C(source.name, 10, 'magenta')} {safe(loc_summary)}")
         console.say(f"{P(str(len(hits)), 'bold')} package(s) - install with {P('txapm install <Id>', 'bold')}")
     if waiting:
         width = max(len(e["id"]) for _, e in waiting)

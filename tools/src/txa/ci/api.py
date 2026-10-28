@@ -47,11 +47,20 @@ def package_document(package_id: str, versions: dict[str, dict]) -> dict:
 
 
 def index_document(packages: dict[str, dict[str, dict]]) -> dict:
+    from txa.core import i18n
+
     index = []
     for package_id in sorted(packages, key=str.lower):
         document = package_document(package_id, packages[package_id])
         latest = document["versions"][document["latest"]]
         about = latest["about"].get(latest["core"]["locale"]["default"]) or next(iter(latest["about"].values()))
+        summaries = {loc: ab["summary"] for loc, ab in latest["about"].items() if isinstance(ab, dict) and ab.get("summary")}
+        vi_sum = summaries.get("vi-VN") or i18n._SUMMARIES_VI.get(package_id.split(".")[-1].lower())
+        if vi_sum:
+            summaries.setdefault("vi-VN", vi_sum)
+        en_sum = summaries.get("en-US") or i18n._SUMMARIES_EN.get(package_id.split(".")[-1].lower()) or about["summary"]
+        if en_sum:
+            summaries.setdefault("en-US", en_sum)
         index.append({
             "id": package_id,
             "alias": latest["core"]["package"].get("alias"),
@@ -61,6 +70,7 @@ def index_document(packages: dict[str, dict[str, dict]]) -> dict:
             "name": about["name"],
             "publisher": about["publisher"],
             "summary": about["summary"],
+            "summaries": summaries,
             "tags": latest["core"].get("tags", []),
             "arches": [t["arch"] for t in latest["build"]["targets"]],
         })

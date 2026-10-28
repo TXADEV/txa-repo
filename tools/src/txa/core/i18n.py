@@ -96,7 +96,8 @@ _EXACT: dict[str, str] = {
     "Extra switches that are always added": "Tham số phụ luôn được thêm vào",
     "Extra download mirrors, separated by commas": "Link tải dự phòng (mirrors), cách nhau bởi dấu phẩy",
     # Field labels
-    "publisher": "nhà phát hành",
+    "publisher": "phát hành",
+    "author": "tác giả",
     "license": "giấy phép",
     "homepage": "trang chủ",
     "language": "ngôn ngữ",
@@ -493,3 +494,100 @@ def translate(text: str) -> str:
     for pattern, repl in _PATTERNS:
         out = pattern.sub(repl, out)
     return out
+
+
+# Curated bilingual package summaries (keyed by lowercase AppName or Package ID slug)
+_SUMMARIES_VI: dict[str, str] = {
+    "antigravityide": "Nền tảng IDE lập trình tích hợp AI Agent thế hệ mới của Google dành cho lập trình viên.",
+    "audacity": "Phần mềm thu âm và chỉnh sửa âm thanh đa kênh miễn phí, dễ sử dụng.",
+    "brave": "Trình duyệt web nhân Chromium tốc độ cao, tự động chặn quảng cáo và bảo vệ quyền riêng tư.",
+    "canhcutteamlauncher": "Ứng dụng PC chuyên dụng để tải và quản lý các bản Việt hóa game của Cánh Cụt Team.",
+    "chrome": "Trình duyệt web chính thức từ Google, nhanh, bảo mật và dễ tuỳ biến.",
+    "claude": "Ứng dụng trợ lý AI Claude chính thức trên máy tính để bàn từ Anthropic.",
+    "cloudflared": "Công cụ dòng lệnh tạo đường hầm Cloudflare Tunnel bảo mật mà không cần mở port IP công cộng.",
+    "coccoc": "Trình duyệt web nhân Chromium tốc độ cao dành cho người Việt.",
+    "discord": "Ứng dụng trò chuyện giọng nói, video và nhắn tin phổ biến dành cho cộng đồng và game thủ.",
+    "edge": "Trình duyệt web đa nền tảng hiệu năng cao và tiết kiệm tài nguyên của Microsoft.",
+    "ffmpeg": "Bộ công cụ dòng lệnh toàn diện để ghi, chuyển đổi định dạng và phát trực tuyến âm thanh/video.",
+    "firefox": "Trình duyệt web mã nguồn mở nhanh, bảo mật và tôn trọng quyền riêng tư từ Mozilla.",
+    "garena": "Nền tảng kết nối, quản lý và khởi chạy các tựa game trực tuyến của Garena.",
+    "gimp": "Phần mềm chỉnh sửa ảnh, ghép ảnh và thiết kế đồ hoạ mã nguồn mở miễn phí.",
+    "git": "Hệ thống quản lý phiên bản phân tán dành cho Windows (kèm Git Bash và Git GUI).",
+    "githubcli": "Công cụ dòng lệnh chính thức của GitHub (gh) để quản lý PR, issue và GitHub Actions ngay trong Terminal.",
+    "githubdesktop": "Ứng dụng giao diện đồ hoạ giúp quản lý kho mã nguồn Git và GitHub trực quan.",
+    "microsoftbuildofopenjdkwithhotspot17": "Bản phân phối Java OpenJDK 17 hỗ trợ dài hạn (LTS) miễn phí chính thức từ Microsoft.",
+    "microsoftnetsdk": "Bộ công cụ phát triển phần mềm .NET SDK đa nền tảng mã nguồn mở của Microsoft.",
+    "microsoftnetwindowsdesktopruntime": "Môi trường thực thi .NET Windows Desktop Runtime để chạy các ứng dụng desktop trên Windows.",
+    "nodejs": "Môi trường chạy JavaScript trên nhân V8, đi kèm trình quản lý gói npm.",
+    "notepadplusplus": "Trình soạn thảo mã nguồn nhẹ, miễn phí thay thế Notepad với hỗ trợ đa tab và tô sáng cú pháp.",
+    "nsis": "Hệ thống tạo bộ cài đặt Windows (.exe) mã nguồn mở chuyên nghiệp, gọn nhẹ.",
+    "ntlite": "Công cụ tuỳ biến bộ cài Windows, tích hợp bản cập nhật, driver và tự động hoá cài đặt hệ điều hành.",
+    "nvm": "Công cụ quản lý và chuyển đổi nhanh giữa nhiều phiên bản Node.js trên Windows.",
+    "obsidian": "Ứng dụng ghi chú và quản lý tri thức cá nhân linh hoạt dựa trên các file Markdown cục bộ.",
+    "obsstudio": "Phần mềm quay màn hình và phát trực tiếp (livestream) mã nguồn mở miễn phí.",
+    "ohmyposh": "Công cụ tuỳ biến giao diện dấu nhắc lệnh (prompt theme) đẹp mắt cho PowerShell và mọi shell.",
+    "onedrive": "Dịch vụ lưu trữ đám mây, sao lưu và đồng bộ hoá dữ liệu giữa các thiết bị của Microsoft.",
+    "physx": "Trình điều khiển vật lý NVIDIA PhysX cần thiết để chạy hiệu ứng vật lý trong nhiều tựa game.",
+    "postman": "Nền tảng phát triển, kiểm thử và cộng tác thiết kế API chuyên nghiệp.",
+    "powertoys": "Bộ tiện ích nâng cao chính thức từ Microsoft giúp tối ưu hoá thao tác và hiệu suất trên Windows.",
+    "putty": "Trình kết nối điều khiển từ xa qua giao thức SSH, Telnet, Rlogin và Serial nhỏ gọn.",
+    "python": "Trình thông dịch ngôn ngữ lập trình Python kèm thư viện chuẩn và trình quản lý gói pip.",
+    "qemuguestagent": "Dịch vụ hỗ trợ máy ảo Windows trên QEMU đồng bộ trạng thái snapshot, tạm dừng và tắt máy.",
+    "rockstargameslauncher": "Trình khởi chạy và quản lý các tựa game PC của Rockstar Games (GTA, Red Dead Redemption).",
+    "rustup": "Trình cài đặt và quản lý chuỗi công cụ (toolchain) chính thức cho ngôn ngữ lập trình Rust.",
+    "sevenzip": "Phần mềm nén và giải nén file miễn phí với tỷ lệ nén cao (hỗ trợ 7z, ZIP, RAR, TAR...).",
+    "sharex": "Công cụ chụp ảnh màn hình, quay video màn hình và chia sẻ nhanh miễn phí, mã nguồn mở.",
+    "spotify": "Ứng dụng nghe nhạc số và podcast trực tuyến với kho hàng triệu bài hát.",
+    "steam": "Nền tảng phân phối bản quyền, tải về và cộng đồng chơi game PC lớn nhất thế giới.",
+    "sunshine": "Giải pháp máy chủ stream game độ trễ thấp mã nguồn mở (tương thích Moonlight, hỗ trợ AMD/Intel/NVIDIA).",
+    "telegramdesktop": "Ứng dụng nhắn tin đám mây trên máy tính tập trung vào tốc độ và bảo mật.",
+    "txawinsetup": "Bộ công cụ thiết lập và tối ưu hoá hệ thống Windows của TXA.",
+    "ubisoftconnect": "Ứng dụng quản lý thư viện game, kết nối bạn bè và dịch vụ của Ubisoft trên PC.",
+    "unity": "Nền tảng phát triển game và nội dung tương tác 3D/2D chuyên nghiệp đa nền tảng.",
+    "unityhub": "Ứng dụng quản lý các dự án và phiên bản bộ công cụ cài đặt Unity Engine.",
+    "vigembus": "Driver nhân Windows giúp giả lập các tay cầm chơi game USB phổ biến (Xbox/DualShock).",
+    "visualstudiocode": "Trình soạn thảo mã nguồn hiện đại, đa năng và giàu tiện ích mở rộng từ Microsoft.",
+    "visualstudiocommunity2026": "Môi trường phát triển tích hợp (IDE) toàn diện từ Microsoft để xây dựng ứng dụng hiện đại.",
+    "vlc": "Trình phát đa phương tiện mã nguồn mở miễn phí, chơi được hầu hết mọi định dạng video và âm thanh.",
+    "warframe": "Tựa game bắn súng hành động góc nhìn thứ ba khoa học viễn tưởng miễn phí (Free-to-Play).",
+    "winscp": "Trình quản lý và truyền tải file qua giao thức SFTP, FTP, WebDAV, S3 và SCP trên Windows.",
+}
+
+_SUMMARIES_EN: dict[str, str] = {
+    "canhcutteamlauncher": "Dedicated PC launcher to download and manage Vietnamese game localizations by Canh Cut Team.",
+    "txawinsetup": "TXA Windows system setup and configuration utility.",
+}
+
+_SUMMARY_PATTERNS_VI: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^Free and open[- ]source (.+)", re.I), r" Phần mềm mã nguồn mở miễn phí: \1"),
+    (re.compile(r"^Cross[- ]platform, open[- ]source (.+)", re.I), r"Nền tảng mã nguồn mở đa nền tảng: \1"),
+    (re.compile(r"\bweb browser\b", re.I), "trình duyệt web"),
+    (re.compile(r"\bcode editor\b", re.I), "trình soạn thảo mã nguồn"),
+    (re.compile(r"\bcommand[- ]line tool\b", re.I), "công cụ dòng lệnh"),
+    (re.compile(r"\bpackage manager\b", re.I), "trình quản lý gói"),
+]
+
+
+def localize_summary(package_id: str, summary: str, summaries_map: dict[str, str] | None = None) -> str:
+    """Return the package summary in the user's selected CLI language ('vi' or 'en')."""
+    slug = package_id.split(".")[-1].lower() if package_id else ""
+    if is_vi():
+        if summaries_map:
+            for k in ("vi-VN", "vi"):
+                if summaries_map.get(k):
+                    return summaries_map[k]
+        if slug in _SUMMARIES_VI:
+            return _SUMMARIES_VI[slug]
+        out = summary or ""
+        for pat, repl in _SUMMARY_PATTERNS_VI:
+            out = pat.sub(repl, out)
+        return out.strip()
+    else:
+        if summaries_map:
+            for k in ("en-US", "en"):
+                if summaries_map.get(k):
+                    return summaries_map[k]
+        if slug in _SUMMARIES_EN:
+            return _SUMMARIES_EN[slug]
+        return summary or ""
+

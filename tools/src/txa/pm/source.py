@@ -161,11 +161,14 @@ class Source:
 
     def search(self, text: str) -> list[dict]:
         """Every word of ``text`` must appear somewhere in the id, names, summary or tags ('-' counts as a space)."""
+        from txa.core import i18n
+
         words = text.lower().replace("-", " ").split()
         hits = []
         for entry in self.index().get("packages", []):
+            loc_summary = i18n.localize_summary(entry["id"], entry.get("summary", ""), entry.get("summaries"))
             haystack = " ".join([entry["id"], entry.get("alias") or "", " ".join(entry.get("aliases", [])),
-                                 entry.get("name", ""), entry.get("summary", ""),
+                                 entry.get("name", ""), entry.get("summary", ""), loc_summary,
                                  " ".join(entry.get("tags", []))]).lower().replace("-", " ")
             if all(word in haystack for word in words):
                 hits.append(entry)
