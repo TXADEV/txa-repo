@@ -201,13 +201,28 @@ class Source:
         return GitHub(self._token or None)
 
     def _github_versions(self, package_id: str) -> list[str]:
-        split_id(package_id)
+        from txa.core.manifest import ManifestError
+
         try:
-            entries = self._gh().get(f"repos/{self.upstream}/contents/{package_dir(package_id)}")
+            split_id(package_id)
+        except ManifestError:
+            raise NotFound(f"package {package_id} not found in {self.upstream}") from None
+        path = f"repos/{self.upstream}/contents/{package_dir(package_id)}"
+        try:
+            entries = self._gh().get(path)
         except GitHubError as exc:
-            if exc.status == 404:
+            if exc.status == 401 and self._token:
+                self._token = ""
+                try:
+                    entries = self._gh().get(path)
+                except GitHubError as exc2:
+                    if exc2.status in (401, 403, 404):
+                        raise NotFound(f"package {package_id} not found in {self.upstream}") from None
+                    raise
+            elif exc.status in (401, 403, 404):
                 raise NotFound(f"package {package_id} not found in {self.upstream}") from None
-            raise
+            else:
+                raise
         return [e["name"] for e in entries if e["type"] == "dir" and semver.is_valid(e["name"])]
 
     def _github_release(self, package_id: str, version: str | None) -> tuple[str, dict]:

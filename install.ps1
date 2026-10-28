@@ -199,6 +199,7 @@ if ($Uninstall) {
     $entries = @((Get-UserPath) -split ';' | Where-Object { $_ -and -not (Test-SamePath $_ $BinDir) })
     Set-UserPath ($entries -join ';')
     [Environment]::SetEnvironmentVariable('TXA_HOME', $null, 'User')  # also broadcasts the change
+    [Environment]::SetEnvironmentVariable('TXA_LANG', $null, 'User')
     if (Test-Path -LiteralPath $InstallDir) {
         Write-Step (T 'deleting' $InstallDir)
         Remove-Item -LiteralPath $InstallDir -Recurse -Force
@@ -296,6 +297,20 @@ if (-not $NoPath) {
 # Setting a user variable broadcasts WM_SETTINGCHANGE, so new terminals pick up PATH too.
 [Environment]::SetEnvironmentVariable('TXA_HOME', $InstallDir, 'User')
 $env:TXA_HOME = $InstallDir
+[Environment]::SetEnvironmentVariable('TXA_LANG', $script:UiLang, 'User')
+$env:TXA_LANG = $script:UiLang
+
+# Persist the chosen UI language into %LOCALAPPDATA%\TXA\config.json for txapm / txacli / txacreate
+$cfgPath = Join-Path $InstallDir 'config.json'
+try {
+    $cfgObj = if (Test-Path -LiteralPath $cfgPath) {
+        Get-Content -LiteralPath $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } else {
+        New-Object PSObject
+    }
+    $cfgObj | Add-Member -MemberType NoteProperty -Name 'lang' -Value $script:UiLang -Force
+    ($cfgObj | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+} catch { }
 
 $installed = & (Join-Path $BinDir 'txapm.exe') --version
 Write-Done (T 'ready' $installed)

@@ -18,7 +18,22 @@ _DEFAULTS = {
     "client_id": lambda: constants.GITHUB_CLIENT_ID,
     "namespace": lambda: constants.DEFAULT_NAMESPACE,
     "api": lambda: constants.API_BASE,
+    "lang": lambda: "en",
 }
+
+
+def lang() -> str:
+    """Active UI language ('en' or 'vi'), configured by install.ps1, `txapm lang`, or TXA_LANG."""
+    raw = (os.environ.get("TXA_LANG") or load_config().get("lang") or "en").strip().lower()
+    return "vi" if raw.startswith("vi") else "en"
+
+
+def set_lang(code: str) -> str:
+    norm = "vi" if code.strip().lower().startswith("vi") else "en"
+    cfg = load_config()
+    cfg["lang"] = norm
+    save_config(cfg)
+    return norm
 
 
 def txa_home() -> Path:

@@ -72,6 +72,9 @@ def paint(text: str, *styles: str, stream=None) -> str:
 
 def say(text: str = "", stream=None, end: str = "\n") -> None:
     """print() that colours a leading glyph: ✓ green, → cyan, ✗ red, ! yellow."""
+    from txa.core import i18n
+
+    text = i18n.translate(text)
     stream = stream or sys.stdout
     body = text.lstrip(" ")
     if body[:1] in _GLYPHS:
@@ -81,7 +84,9 @@ def say(text: str = "", stream=None, end: str = "\n") -> None:
 
 
 def error(prefix: str, message: str) -> None:
-    print(f"{paint(prefix + ':', 'red', 'bold', stream=sys.stderr)} {message}", file=sys.stderr)
+    from txa.core import i18n
+
+    print(f"{paint(prefix + ':', 'red', 'bold', stream=sys.stderr)} {i18n.translate(message)}", file=sys.stderr)
 
 
 def cell(text: str, width: int, *styles: str) -> str:
@@ -124,7 +129,9 @@ def human_size(count: float) -> str:
 
 def stage(index: int, total: int, text: str) -> None:
     """A numbered phase of a long command: ``[2/5] Downloading …``."""
-    print(f"{paint(f'[{index}/{total}]', 'cyan', 'bold')} {text}")
+    from txa.core import i18n
+
+    print(f"{paint(f'[{index}/{total}]', 'cyan', 'bold')} {i18n.translate(text)}")
 
 
 def progress(label_text: str):
@@ -543,8 +550,12 @@ class SmartArgumentParser(argparse.ArgumentParser):
         return flags, subcmds
 
     def error(self, message: str):
+        from txa.core import i18n
+
         self.print_usage(sys.stderr)
         hint_line = ""
+        lbl_cmd = i18n.tr("→ Did you mean:", "→ Gợi ý lệnh:")
+        lbl_flg = i18n.tr("→ Did you mean flag:", "→ Gợi ý tham số:")
 
         m_choice = re.search(r"invalid choice:\s*'([^']+)'\s*\(choose from ([^)]+)\)", message)
         if m_choice:
@@ -553,7 +564,7 @@ class SmartArgumentParser(argparse.ArgumentParser):
             matches = suggest_words(bad, raw_choices)
             if matches:
                 styled = ", ".join(paint(f"{self.prog} {m}", "green", "bold", stream=sys.stderr) for m in matches)
-                hint_line = f"  {paint('→ Did you mean / Gợi ý lệnh:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+                hint_line = f"  {paint(lbl_cmd, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
 
         if not hint_line:
             m_unrec = re.search(r"unrecognized arguments:\s*(.+)$", message)
@@ -564,12 +575,12 @@ class SmartArgumentParser(argparse.ArgumentParser):
                     matches = suggest_words(bad_tok, flags)
                     if matches:
                         styled = ", ".join(paint(m, "green", "bold", stream=sys.stderr) for m in matches)
-                        hint_line = f"  {paint('→ Did you mean flag / Gợi ý tham số:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+                        hint_line = f"  {paint(lbl_flg, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
                 else:
                     matches = suggest_words(bad_tok, subcmds)
                     if matches:
                         styled = ", ".join(paint(f"{self.prog} {m}", "green", "bold", stream=sys.stderr) for m in matches)
-                        hint_line = f"  {paint('→ Did you mean / Gợi ý lệnh:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+                        hint_line = f"  {paint(lbl_cmd, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
 
         err_prefix = paint(f"{self.prog}: error:", "red", "bold", stream=sys.stderr)
         self.exit(2, f"{err_prefix} {message}\n{hint_line}")

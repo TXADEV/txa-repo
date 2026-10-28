@@ -497,20 +497,26 @@ def cmd_source(args) -> int:
 
 
 def cmd_info() -> int:
-    from txa.core import credentials
+    from txa.core import credentials, i18n
 
     record = credentials.stored() or {}
     current = winos.current()
     email = f" <{record['email']}>" if record.get("email") else ""
     enabled = [i["name"] for i in config.sources() if i.get("enabled", True)]
+    cur_lang = config.lang()
+    lang_label = "vi (Tiếng Việt)" if cur_lang == "vi" else "en (English)"
     rows = [
         ("windows", f"{winos.fmt(current) if current else '-'} · {winos.native_arch()}"),
-        ("sources", ", ".join(enabled) or "(none enabled)"),
+        ("language", lang_label),
+        ("sources", ", ".join(enabled) or i18n.tr("(none enabled)", "(chưa bật kho nào)")),
         ("repository", str(config.get("upstream"))),
         ("home", str(config.txa_home())),
         ("downloads", str(config.temp_root())),
         ("logs", str(config.txa_home() / "logs")),
-        ("installed", f"{len(installer.installed())} package(s), {len(installer.pins())} pin(s)"),
+        ("installed", i18n.tr(
+            f"{len(installer.installed())} package(s), {len(installer.pins())} pin(s)",
+            f"{len(installer.installed())} gói đã cài, {len(installer.pins())} đang ghim",
+        )),
         ("github", f"{record.get('login', '-')}{email}"),
     ]
     print(f"{P('txapm', 'bold', 'cyan')} {P(__version__, 'green', 'bold')}")
@@ -739,23 +745,29 @@ def cmd_which(args) -> int:
 def cmd_doctor(args) -> int:
     """Run health diagnostics on txapm, sources, WinGet, and local environment."""
     import subprocess
-    from txa.core import credentials
+    from txa.core import credentials, i18n
 
+    vi = i18n.is_vi()
     print(f"{P('TXA Doctor', 'bold', 'cyan')} · txapm {P(__version__, 'green', 'bold')}\n")
     current = winos.current()
+    cur_lang = "Tiếng Việt (vi)" if vi else "English (en)"
     print(f"  {P('✓', 'green')} Windows:     {winos.fmt(current) if current else 'unknown'} ({winos.native_arch()}) · admin={installer.is_admin()}")
+    print(f"  {P('✓', 'green')} {i18n.tr('Language:   ', 'Ngôn ngữ:   ')} {P(cur_lang, 'cyan')} ({i18n.tr('change with `txapm lang`', 'đổi bằng `txapm lang`')})")
 
     # Sources check
     for src_cfg in config.sources():
         if not src_cfg.get("enabled", True):
-            print(f"  {P('-', 'gray')} Source '{src_cfg['name']}': disabled ({src_cfg['url']})")
+            print(f"  {P('-', 'gray')} {i18n.tr('Source', 'Kho nguồn')} '{src_cfg['name']}': {i18n.tr('disabled', 'đã tắt')} ({src_cfg['url']})")
             continue
         try:
             s = Sources(src_cfg["name"]).items[0]
             cnt = s.index().get("count", 0)
-            print(f"  {P('✓', 'green')} Source '{P(src_cfg['name'], 'magenta')}': online · {P(str(cnt), 'bold')} package(s) ({src_cfg['url']})")
+            if vi:
+                print(f"  {P('✓', 'green')} Kho '{P(src_cfg['name'], 'magenta')}': trực tuyến · {P(str(cnt), 'bold')} gói ({src_cfg['url']})")
+            else:
+                print(f"  {P('✓', 'green')} Source '{P(src_cfg['name'], 'magenta')}': online · {P(str(cnt), 'bold')} package(s) ({src_cfg['url']})")
         except Exception as exc:
-            print(f"  {P('✗', 'red')} Source '{src_cfg['name']}': error ({exc})")
+            print(f"  {P('✗', 'red')} {i18n.tr('Source', 'Kho')} '{src_cfg['name']}': {i18n.tr('error', 'lỗi')} ({exc})")
 
     # WinGet check
     try:
@@ -764,22 +776,45 @@ def cmd_doctor(args) -> int:
     except Exception:
         wg_ver = None
     if wg_ver:
-        print(f"  {P('✓', 'green')} WinGet CLI:  {wg_ver} (ready for `txacli` & `txapm winget`)")
+        print(f"  {P('✓', 'green')} WinGet CLI:  {wg_ver} ({i18n.tr('ready for `txacli` & `txapm winget`', 'sẵn sàng cho `txacli` & `txapm winget`')})")
     else:
-        print(f"  {P('!', 'yellow')} WinGet CLI:  not found in PATH")
+        print(f"  {P('!', 'yellow')} WinGet CLI:  {i18n.tr('not found in PATH', 'chưa có trong PATH')}")
 
     # GitHub credentials
     rec = credentials.stored()
     if rec and rec.get("login"):
-        print(f"  {P('✓', 'green')} GitHub Auth: signed in as {P(rec['login'], 'cyan')}")
+        print(f"  {P('✓', 'green')} GitHub Auth: {i18n.tr('signed in as', 'đã đăng nhập tài khoản')} {P(rec['login'], 'cyan')}")
     else:
-        print(f"  {P('-', 'gray')} GitHub Auth: not signed in (optional; run `txacreate token --store` for PRs)")
+        print(f"  {P('-', 'gray')} GitHub Auth: {i18n.tr('not signed in (optional; run `txacreate token --store` for PRs)', 'chưa đăng nhập (tùy chọn; chạy `txacreate token --store` khi cần mở PR)')}")
 
     # Installed & cache stats
     records = installer.installed()
     temp_bytes = sum(f.stat().st_size for f in config.temp_root().rglob("*") if f.is_file()) if config.temp_root().is_dir() else 0
-    print(f"  {P('✓', 'green')} Installed:   {len(records)} package(s) managed by txapm · {len(installer.pins())} pinned")
-    print(f"  {P('✓', 'green')} Cache size:  {console.human_size(temp_bytes)} in {config.temp_root()} (clean with `txapm clean`)")
+    if vi:
+        print(f"  {P('✓', 'green')} Đã cài đặt:  {len(records)} gói quản lý bởi txapm · {len(installer.pins())} gói đang ghim")
+        print(f"  {P('✓', 'green')} Bộ nhớ đệm:  {console.human_size(temp_bytes)} tại {config.temp_root()} (dọn bằng `txapm clean`)")
+    else:
+        print(f"  {P('✓', 'green')} Installed:   {len(records)} package(s) managed by txapm · {len(installer.pins())} pinned")
+        print(f"  {P('✓', 'green')} Cache size:  {console.human_size(temp_bytes)} in {config.temp_root()} (clean with `txapm clean`)")
+    return 0
+
+
+def cmd_lang(args) -> int:
+    """View or switch TXA display language (en / vi)."""
+    if getattr(args, "code", None):
+        chosen = config.set_lang(args.code)
+    else:
+        default_idx = 1 if config.lang() == "vi" else 0
+        opts = [
+            console.Option("en", "English", "Display all CLI messages in English"),
+            console.Option("vi", "Tiếng Việt", "Hiển thị mọi thông báo CLI bằng Tiếng Việt"),
+        ]
+        picked = console.choose("Language / Ngôn ngữ (use ↑/↓ or 1-2, Enter to confirm)", "lang", opts, default=default_idx)
+        chosen = config.set_lang(str(picked.value))
+    if chosen == "vi":
+        print(f"{P('✓', 'green', 'bold')} Đã chuyển ngôn ngữ sang {P('Tiếng Việt (vi)', 'cyan', 'bold')}")
+    else:
+        print(f"{P('✓', 'green', 'bold')} Language set to {P('English (en)', 'cyan', 'bold')}")
     return 0
 
 
@@ -983,6 +1018,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("doctor", aliases=["check", "status"], help="check system health, sources, WinGet, and cache")
     p.set_defaults(func=cmd_doctor)
 
+    p = sub.add_parser("lang", aliases=["language"], help="view or switch display language (en / vi)")
+    p.add_argument("code", nargs="?", choices=["en", "vi"], help="en (English) or vi (Tiếng Việt)")
+    p.set_defaults(func=cmd_lang)
+
     args = parser.parse_args(argv)
     if args.info:
         return cmd_info()
@@ -992,6 +1031,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except NotFound as exc:
+        from txa.core import i18n
+
         rc = _die(str(exc))
         pkg_arg = getattr(args, "package", None)
         if pkg_arg:
@@ -999,12 +1040,18 @@ def main(argv: list[str] | None = None) -> int:
                 suggestions = Sources(getattr(args, "source", None)).suggest(pkg_arg)
                 if suggestions:
                     styled = ", ".join(P(s, "green", "bold") for s in suggestions)
-                    console.say(f"  {P('→ Did you mean / Gợi ý gói:', 'cyan', 'bold')} {styled}")
+                    lbl = i18n.tr("→ Did you mean:", "→ Gợi ý gói:")
+                    console.say(f"  {P(lbl, 'cyan', 'bold')} {styled}")
             except Exception:
                 pass
         return rc
-    except (InstallError, SourceError, net.NetError) as exc:
-        return _die(str(exc))
+    except Exception as exc:
+        from txa.core.github import GitHubError
+        from txa.core.manifest import ManifestError
+
+        if isinstance(exc, (InstallError, SourceError, net.NetError, GitHubError, ManifestError)):
+            return _die(str(exc))
+        raise
     except KeyboardInterrupt:
         return _die("cancelled")
 
