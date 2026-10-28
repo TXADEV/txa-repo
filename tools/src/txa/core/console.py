@@ -365,8 +365,9 @@ def choose(question: str, key: str, options: list[Option], default: int = 0) -> 
         for position, option in enumerate(options):
             selected = position == index
             marker = paint("›", "cyan", "bold") if selected else " "
-            label = cell(option.label, 18, "bold", "cyan") if selected else cell(option.label, 18)
-            out.write(f"\x1b[K  {marker} {label} {paint(option.note, 'gray')}\n")
+            num = paint(f"{position + 1:>2})", "cyan", "bold") if selected else paint(f"{position + 1:>2})", "gray")
+            label = cell(option.label, 24, "bold", "cyan") if selected else cell(option.label, 24)
+            out.write(f"\x1b[K  {marker} {num} {label} {paint(option.note, 'gray')}\n")
         out.flush()
 
     print(head)

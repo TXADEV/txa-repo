@@ -129,17 +129,61 @@ function T([string]$Key, [object[]]$Args2) {
 function Select-Language {
     try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }  # so Vietnamese letters in the question display correctly
     if ($Lang -in @('en', 'vi')) { return $Lang }
-    $default = if ((Get-UICulture).Name -like 'vi*') { 2 } else { 1 }
+    $options = @(
+        @{ Code = 'en'; Label = '1) English' },
+        @{ Code = 'vi'; Label = ('2) Ti' + [regex]::Unescape('\u1ebfng Vi\u1ec7t')) }
+    )
+    $selected = if ((Get-UICulture).Name -like 'vi*') { 1 } else { 0 }
+    $title = '  Language / ' + [regex]::Unescape('Ng\u00f4n ng\u1eef')
+    $hint  = ' (' + [regex]::Unescape('d\u00f9ng \u2191/\u2193 ho\u1eb7c ph\u00edm 1-2, Enter \u0111\u1ec3 ch\u1ecdn') + ')'
+
     try {
+        if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { throw 'non-interactive' }
         Write-Host ''
-        Write-Host ('  Language / ' + [regex]::Unescape('Ng\u00f4n ng\u1eef')) -ForegroundColor Cyan
-        Write-Host '    1) English'
-        Write-Host ('    2) Ti' + [regex]::Unescape('\u1ebfng Vi\u1ec7t'))
-        $answer = Read-Host "  [1-2] (Enter = $default)"
-    } catch { return $(if ($default -eq 2) { 'vi' } else { 'en' }) }
-    if ($answer -match '^\s*(2|vi|v)') { return 'vi' }
-    if ($answer -match '^\s*(1|en|e)') { return 'en' }
-    return $(if ($default -eq 2) { 'vi' } else { 'en' })
+        Write-Host "$title$hint" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $options.Count; $i++) { Write-Host '' }
+        $top = [Console]::CursorTop - $options.Count
+        while ($true) {
+            for ($i = 0; $i -lt $options.Count; $i++) {
+                [Console]::SetCursorPosition(0, $top + $i)
+                $isSel = ($i -eq $selected)
+                $marker = if ($isSel) { [regex]::Unescape('  \u203a ') } else { '    ' }
+                $text = ($marker + $options[$i].Label).PadRight(44)
+                if ($isSel) {
+                    Write-Host $text -ForegroundColor Cyan -NoNewline
+                } else {
+                    Write-Host $text -ForegroundColor Gray -NoNewline
+                }
+            }
+            [Console]::SetCursorPosition(0, $top + $options.Count)
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                'UpArrow'    { $selected = ($selected + $options.Count - 1) % $options.Count }
+                'DownArrow'  { $selected = ($selected + 1) % $options.Count }
+                'LeftArrow'  { $selected = ($selected + $options.Count - 1) % $options.Count }
+                'RightArrow' { $selected = ($selected + 1) % $options.Count }
+                'Enter'      { Write-Host ''; return $options[$selected].Code }
+                default {
+                    if ($key.KeyChar -eq '1') { $selected = 0 }
+                    elseif ($key.KeyChar -eq '2') { $selected = 1 }
+                    elseif ($key.KeyChar -in @('e', 'E')) { $selected = 0 }
+                    elseif ($key.KeyChar -in @('v', 'V')) { $selected = 1 }
+                }
+            }
+        }
+    } catch {
+        $defaultNum = $selected + 1
+        try {
+            Write-Host ''
+            Write-Host $title -ForegroundColor Cyan
+            Write-Host '    1) English'
+            Write-Host ('    2) Ti' + [regex]::Unescape('\u1ebfng Vi\u1ec7t'))
+            $answer = Read-Host "  [1-2] (Enter = $defaultNum)"
+        } catch { return $options[$selected].Code }
+        if ($answer -match '^\s*(2|vi|v)') { return 'vi' }
+        if ($answer -match '^\s*(1|en|e)') { return 'en' }
+        return $options[$selected].Code
+    }
 }
 $script:UiLang = Select-Language
 

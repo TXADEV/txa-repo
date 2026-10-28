@@ -98,12 +98,14 @@ def do_import(args) -> int:
         if getattr(args, "yes", False) or not sys.stdin.isatty():
             queries.extend(item["id"] for item in untracked)
         else:
-            choice = console.ask("\nEnter numbers to import (e.g. 1,3,5 or 'all')", "all").strip().lower()
-            if choice == "all":
+            options = [console.Option("all", "All programs", f"import all {len(untracked)} program(s)")]
+            for item in untracked:
+                options.append(console.Option(item["id"], item["name"][:24], f"{item['id']} ({item['version']})"))
+            picked = console.choose("\nSelect program to import (use ↑/↓ or type number, Enter to confirm)", "import", options, default=0)
+            if picked.value == "all":
                 queries.extend(item["id"] for item in untracked)
             else:
-                idxs = [int(x.strip()) for x in choice.split(",") if x.strip().isdigit()]
-                queries.extend(untracked[i - 1]["id"] for i in idxs if 1 <= i <= len(untracked))
+                queries.append(str(picked.value))
 
     if not queries:
         return 1

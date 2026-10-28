@@ -447,12 +447,11 @@ def cmd_new(args) -> int:
         if args.yes or not sys.stdin.isatty():
             picked = untracked
         else:
-            raw = console.ask("\nWhich program(s) to add? (e.g. 1,3,5 or 'all')", "all").strip().lower()
-            if raw == "all":
-                picked = untracked
-            else:
-                indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
-                picked = [untracked[i - 1] for i in indices if 1 <= i <= len(untracked)]
+            options = [console.Option("all", "All programs", f"import all {len(untracked)} program(s)")]
+            for item in untracked:
+                options.append(console.Option(item, item["name"][:24], f"{item['id']} ({item['version']})"))
+            chosen = console.choose("\nSelect program to add (use ↑/↓ or type number, Enter to confirm)", "program", options, default=0)
+            picked = untracked if chosen.value == "all" else [chosen.value]
         if not picked:
             return _die("no programs selected")
         rc = 0
