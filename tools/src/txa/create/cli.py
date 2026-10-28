@@ -589,7 +589,11 @@ def _cmd_new_single(args) -> int:
         if broken and not args.force:
             return _die("the cards have problems - fix them, or pass --force to open the PR anyway")
         save_root = Path(args.out) if args.out else Path.home() / "manifests"
-        rel_dir = draft.directory.relative_to("manifests") if draft.directory.parts[0] == "manifests" and save_root.name == "manifests" else draft.directory
+        draft_path = Path(draft.directory)
+        if save_root.name.lower() == "manifests" and draft_path.parts and draft_path.parts[0].lower() == "manifests":
+            rel_dir = Path(*draft_path.parts[1:])
+        else:
+            rel_dir = draft_path
         saved = save_root / rel_dir
         saved.mkdir(parents=True, exist_ok=True)
         for filename, text in rendered.items():

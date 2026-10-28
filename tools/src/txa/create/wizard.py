@@ -24,7 +24,7 @@ ARCHES = [
 
 
 def docs_url() -> str:
-    return f"https://github.com/{config.get('upstream')}/tree/main/tools/src/txa/schemas"
+    return f"https://github.com/{config.get('upstream')}/blob/main/docs/manifest-schema.md"
 
 
 def intro() -> None:
