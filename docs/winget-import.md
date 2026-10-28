@@ -81,3 +81,4 @@ txapm install chrome -s myrepo
 | `--build-api` | Tự động chạy `txaci build-api` sau khi import | |
 | `--api-out <thư-mục>` | Thư mục chứa API tĩnh đầu ra | `dist/api` |
 | `--dry-run` | Xem trước, không ghi file | |
+
