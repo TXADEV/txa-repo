@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -338,10 +339,17 @@ def cmd_list(args) -> int:
 def _list_machine(args) -> int:
     """Every program Windows knows about; those also in TXA get an Id, Available and Source."""
     index: dict[str, tuple[str, dict]] = {}
+    slug_index: dict[str, tuple[str, dict]] = {}
     for source in Sources().items:
         try:
             for entry in source.index().get("packages", []):
-                index.setdefault(entry["name"].lower(), (source.name, entry))
+                pair = (source.name, entry)
+                index.setdefault(entry["name"].lower(), pair)
+                app_slug = re.sub(r"[^a-z0-9]", "", entry["id"].split(".")[-1].lower())
+                if app_slug:
+                    slug_index.setdefault(app_slug, pair)
+                if entry.get("alias"):
+                    slug_index.setdefault(re.sub(r"[^a-z0-9]", "", entry["alias"].lower()), pair)
         except Exception:  # offline source: still list the machine
             continue
     rows = []
@@ -349,7 +357,15 @@ def _list_machine(args) -> int:
         if not program.name:
             continue
         lowered = program.name.lower()
-        match = index.get(lowered) or next((v for n, v in index.items() if lowered.startswith(n + " ")), None)
+        cleaned = re.sub(r"\s*\((?:user|machine|x64|x86|64-bit|32-bit|remove only)\)\s*", " ", lowered).strip()
+        cleaned = re.sub(r"\s+(?:version\s+)?v?\d+(?:\.\d+)+.*$", "", cleaned).strip()
+        collapsed = re.sub(r"[^a-z0-9]", "", cleaned)
+        match = (
+            index.get(lowered)
+            or index.get(cleaned)
+            or next((v for n, v in index.items() if lowered.startswith(n + " ") or cleaned.startswith(n + " ")), None)
+            or (slug_index.get(collapsed) if len(collapsed) >= 3 else None)
+        )
         origin, entry = match if match else ("", None)
         version = program.version or ""
         newest = ""

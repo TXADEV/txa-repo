@@ -1,43 +1,49 @@
-# Import Package từ WinGet vào TXA (`winget-import`)
+# Import & Tự Động Tạo Package từ WinGet / Máy Cá Nhân (`txacreate` & `winget-import`)
 
-Công cụ [`scripts/winget-import.ps1`](../scripts/winget-import.ps1) (và [`scripts/winget-import.py`](../scripts/winget-import.py)) cho phép lấy metadata và link tải chính thức từ kho WinGet, chuẩn hóa theo schema của TXA, và tự động tạo kho source cho `txapm`.
+Công cụ [`scripts/winget-import.ps1`](../scripts/winget-import.ps1) và lệnh `txacreate new` đã được tích hợp trực tiếp cầu nối WinGet, cho phép lấy bất kỳ phần mềm nào từ `txapm list --all` hoặc tên phần mềm bất kỳ để tự động tạo manifest chuẩn TXA mà không cần đi tìm link tải thủ công.
 
 ---
 
-## 1. Tìm kiếm package trên WinGet
+## 1. Tự động thêm toàn bộ phần mềm đang cài trên máy (`--from-installed`)
+
+Quét toàn bộ phần mềm trên máy (tương tự `txapm list --all`), lọc ra các phần mềm chưa có trong kho TXA và tự động tạo manifest:
+
+```powershell
+# Quét và tự động import tất cả phần mềm trên máy vào kho manifests/
+.\scripts\winget-import.ps1 --from-installed -y
+
+# Hoặc chạy ở chế độ chọn từng số (1,3,5 hoặc all):
+.\scripts\winget-import.ps1 -i
+```
+
+Nếu muốn chạy qua luồng `txacreate new` đầy đủ (tự động tải file `.exe`/`.msi` thật về máy, kiểm tra SHA-256 & PE header):
+
+```powershell
+txacreate new --from-installed --dry-run
+```
+
+---
+
+## 2. Truyền thẳng Tên App bất kỳ từ `txapm list --all` vào `txacreate new`
+
+Không cần tìm URL tải `.exe`/`.msi`, chỉ cần gõ tên hiển thị hoặc WinGet ID vào `txacreate new`:
+
+```powershell
+# Truyền tên phần mềm bất kỳ (hoặc nhiều phần mềm cùng lúc)
+txacreate new "GitHub CLI" "Unity Hub" "Steam" --dry-run --out .
+
+# Hoặc dùng script winget-import cực nhanh (không cần tải toàn bộ bộ cài nặng về máy)
+.\scripts\winget-import.ps1 "GitHub CLI" "GitHub Desktop" "Steam" "Sunshine" "Unity Hub"
+```
+
+---
+
+## 3. Tìm kiếm package trên WinGet
 
 ```powershell
 .\scripts\winget-import.ps1 -s "chrome"
-.\scripts\winget-import.ps1 -s "vscode"
+.\scripts\winget-import.ps1 -s "Unity Hub"
 ```
-
-Lệnh sẽ liệt kê danh sách kết quả gồm `Id`, `Version`, `Name`.
-
----
-
-## 2. Xem thử trước (Dry-Run)
-
-Không ghi file vào ổ đĩa, chỉ in ra màn hình các card YAML đã chuẩn hóa:
-
-```powershell
-.\scripts\winget-import.ps1 Google.Chrome --dry-run
-```
-
----
-
-## 3. Import trực tiếp vào kho `manifests/` của repo
-
-```powershell
-.\scripts\winget-import.ps1 Google.Chrome
-# Hoặc import nhiều gói cùng lúc:
-.\scripts\winget-import.ps1 Google.Chrome Microsoft.VisualStudioCode Brave.Brave
-```
-
-File sẽ được lưu vào:
-`manifests/<chữ-cái>/TXAVL/<AppName>/<Version>/`
-- `core.txa.yaml`
-- `build.txa.yaml`
-- `about.en-US.txa.yaml`
 
 ---
 
@@ -47,38 +53,26 @@ Nếu muốn import ra một thư mục riêng để làm kho source nội bộ/
 
 ```powershell
 # Import app và sinh luôn REST API txa.v1
-.\scripts\winget-import.ps1 Google.Chrome -o D:\my-txa-repo --build-api --api-out D:\my-txa-api
-```
+.\scripts\winget-import.ps1 --from-installed -y -o D:\my-txa-repo --build-api --api-out D:\my-txa-api
 
-Thêm kho vừa tạo vào `txapm`:
-
-```powershell
-# Cách 1: Thêm trực tiếp thư mục local
+# Thêm kho vừa tạo vào txapm
 txapm source add myrepo D:\my-txa-repo
-
-# Cách 2: Host D:\my-txa-api lên web server / GitHub Pages
-txapm source add myrepo https://my-server.com/api/txa/v1
-```
-
-Kiểm tra và cài thử:
-
-```powershell
-txapm search chrome -s myrepo
-txapm install chrome -s myrepo
 ```
 
 ---
 
-## Các tham số hỗ trợ
+## Các tham số hỗ trợ (`winget-import.ps1`)
 
 | Tham số | Ý nghĩa | Mặc định |
 |---|---|---|
-| `[packages ...]` | Một hoặc nhiều WinGet Package ID (vd `7zip.7zip`, `Git.Git`) | |
-| `-s`, `--search <từ-khóa>` | Tìm kiếm package trên WinGet | |
+| `[packages ...]` | Tên phần mềm bất kỳ (copy từ `txapm list --all`) hoặc WinGet ID | |
+| `-i`, `--from-installed` | Tự động quét phần mềm đã cài trên máy chưa có trong TXA | |
+| `-y`, `--yes` | Tự động chạy toàn bộ không hỏi lại | |
+| `--txacreate` | Chuyển tiếp sang `txacreate new` (tải file thật & phân tích PE) | |
+| `-s`, `--search <từ-khóa>` | Tìm kiếm WinGet ID theo tên phần mềm | |
 | `-n`, `--namespace <tên>` | Namespace cho TXA package | `TXAVL` |
 | `--id <ID-cụ-thể>` | Đặt tên Package ID riêng (vd `TXAVL.Chrome`) | Tự sinh |
 | `-o`, `--out <thư-mục>` | Thư mục chứa manifests đầu ra | `./manifests` |
 | `--build-api` | Tự động chạy `txaci build-api` sau khi import | |
 | `--api-out <thư-mục>` | Thư mục chứa API tĩnh đầu ra | `dist/api` |
 | `--dry-run` | Xem trước, không ghi file | |
-

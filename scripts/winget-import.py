@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""WinGet to TXA Package Converter.
+"""WinGet to TXA Package Converter & Auto-Creator.
 
-Imports packages from Windows Package Manager (WinGet) into TXA manifest repository.
+Imports packages from Windows Package Manager (WinGet) into TXA manifest repository,
+or feeds them directly into `txacreate new`.
 Supports:
-  1. WinGet CLI lookup: fetch package metadata and installer targets (x64, arm64, x86).
-  2. Local WinGet manifest directory parsing (winget-pkgs YAML files).
-  3. Strict TXA schema validation and version normalization.
-  4. Automatic static API generation via `txaci build-api`.
+  1. Arbitrary app names from `txapm list --all` (e.g. "GitHub CLI", "Unity Hub 3.22.2") or WinGet IDs.
+  2. `--from-installed` (`-i`): automatically scan installed programs on the PC not yet in TXA.
+  3. `--txacreate`: run `txacreate new` automatically (full binary download, SHA-256 & PE inspection).
+  4. Fast metadata conversion into `manifests/` with 14-step validation compliance.
 """
 from __future__ import annotations
 
 import argparse
 import os
 import re
-import shutil
-import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -37,57 +37,10 @@ except ImportError:
     else:
         sys.exit("Error: Required dependencies (yaml, jsonschema, txa) not found. Run in tools/.venv.")
 
-from txa.core import console, engines, licenses, semver
-from txa.core.manifest import (
-    BUILD_FILE, CORE_FILE, SCHEMA_URL, Bundle, about_file, dump_card, ref_of, release_dir, schema_errors, split_id
-)
+from txa.core import console, licenses
+from txa.core.manifest import BUILD_FILE, CORE_FILE, about_file, schema_errors
+from txa.create import winget as wg
 from txa.create.draft import Draft, TargetDraft, pascal
-
-DEFAULT_SWITCHES = {
-    "inno": {"silent": "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-", "progress": "/SILENT /SUPPRESSMSGBOXES /NORESTART /SP-"},
-    "nsis": {"silent": "/S", "progress": "/S"},
-    "msi": {"silent": "/qn /norestart", "progress": "/qb! /norestart"},
-    "wix": {"silent": "/quiet /norestart", "progress": "/passive /norestart"},
-    "exe": {"silent": "/S", "progress": "/S"},
-}
-
-ENGINE_MAP = {
-    "inno": "inno",
-    "nullsoft": "nsis",
-    "nsis": "nsis",
-    "msi": "msi",
-    "wix": "wix",
-    "burn": "wix",
-    "zip": "portable",
-    "portable": "portable",
-    "exe": "exe",
-}
-
-_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,31}$")
-_TOP_KEY_RE = re.compile(r"^([A-Za-z0-9 ]+):\s*(.*)$")
-
-
-def clean_tag(tag: str) -> str | None:
-    t = re.sub(r"[^a-z0-9-]", "", str(tag).strip().lower())
-    t = t.strip("-")
-    if 2 <= len(t) <= 32 and _TAG_RE.match(t):
-        return t
-    return None
-
-
-def normalize_version(v: str) -> str:
-    """Coerce any version into strict X.Y.Z semver."""
-    if not v:
-        return "1.0.0"
-    v_clean = re.sub(r"^[vV]", "", str(v).strip())
-    parts = re.findall(r"\d+", v_clean)
-    if not parts:
-        return "1.0.0"
-    if len(parts) == 1:
-        return f"{int(parts[0])}.0.0"
-    if len(parts) == 2:
-        return f"{int(parts[0])}.{int(parts[1])}.0"
-    return f"{int(parts[0])}.{int(parts[1])}.{int(parts[2])}"
 
 
 def sanitize_alias(moniker: str | None) -> str | None:
@@ -99,165 +52,18 @@ def sanitize_alias(moniker: str | None) -> str | None:
     return None
 
 
-def parse_winget_cli_output(text: str) -> dict | None:
-    """Parse output from `winget show` robustly even with colons in description text."""
-    lines = text.strip().splitlines()
-    if not lines:
-        return None
-
-    pkg_name = None
-    pkg_id = None
-    first = lines[0].strip()
-    match = re.search(r"Found\s+(.+?)\s+\[([^\]]+)\]", first)
-    if match:
-        pkg_name = match.group(1).strip()
-        pkg_id = match.group(2).strip()
-        body_lines = lines[1:]
-    else:
-        body_lines = lines
-
-    # Parse top-level sections
-    sections: dict[str, list[str]] = {}
-    current_key: str | None = None
-    current_lines: list[str] = []
-
-    for line in body_lines:
-        m = _TOP_KEY_RE.match(line)
-        if m and not line.startswith(" "):
-            if current_key:
-                sections[current_key] = current_lines
-            current_key = m.group(1).strip()
-            rest = m.group(2).strip()
-            current_lines = [rest] if rest else []
-        else:
-            if current_key is not None:
-                current_lines.append(line)
-
-    if current_key:
-        sections[current_key] = current_lines
-
-    data: dict[str, Any] = {}
-    if pkg_name:
-        data["PackageName"] = pkg_name
-    if pkg_id:
-        data["PackageIdentifier"] = pkg_id
-
-    # Scalar fields
-    for k in ["Version", "Publisher", "Publisher Url", "Publisher Support Url", "Author", "Moniker",
-              "Homepage", "License", "License Url", "Copyright"]:
-        if k in sections and sections[k]:
-            data[k] = sections[k][0]
-
-    # Description (join multi-line text)
-    if "Description" in sections:
-        desc_lines = [l.strip() for l in sections["Description"] if l.strip()]
-        data["Description"] = " ".join(desc_lines)
-
-    # Tags (list)
-    if "Tags" in sections:
-        tags = [l.strip().lstrip("-").strip() for l in sections["Tags"] if l.strip()]
-        data["Tags"] = tags
-
-    # Installer section (parsed with YAML since it is strict key-value)
-    if "Installer" in sections:
-        inst_block = "\n".join(sections["Installer"])
-        try:
-            inst_dict = yaml.safe_load(inst_block)
-            if isinstance(inst_dict, dict):
-                data["Installer"] = inst_dict
-        except Exception:
-            pass
-
-    return data
-
-
-def query_winget_cli(package_id: str, arches: list[str] = ("x64", "arm64", "x86")) -> dict | None:
-    """Query winget CLI across requested CPU architectures and combine targets."""
-    combined: dict[str, Any] = {}
-    targets_by_arch: dict[str, dict] = {}
-
-    for arch in arches:
-        cmd = ["winget", "show", "--id", package_id, "-e", "-a", arch, "-s", "winget", "--disable-interactivity", "--nowarn"]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=20)
-        except Exception:
-            continue
-        if res.returncode != 0 or not res.stdout:
-            continue
-
-        parsed = parse_winget_cli_output(res.stdout)
-        if not parsed:
-            continue
-
-        if not combined:
-            combined = parsed
-
-        inst = parsed.get("Installer")
-        if isinstance(inst, dict):
-            url = inst.get("Installer Url")
-            sha = inst.get("Installer SHA256")
-            if url and sha:
-                inst_type = str(inst.get("Installer Type", "exe")).lower()
-                targets_by_arch[arch] = {
-                    "arch": arch,
-                    "url": str(url).strip(),
-                    "sha256": str(sha).strip().upper(),
-                    "type": inst_type,
-                    "switches": inst.get("Installer Switches") or {},
-                }
-
-    if not combined or not targets_by_arch:
-        return None
-
-    combined["_targets"] = targets_by_arch
-    return combined
-
-
-def search_winget(query: str, limit: int = 15) -> list[dict]:
-    """Search winget packages matching query."""
-    cmd = ["winget", "search", query, "-s", "winget", "--disable-interactivity", "--nowarn"]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=25)
-    except Exception as e:
-        print(f"Error searching winget: {e}")
-        return []
-
-    results = []
-    lines = res.stdout.strip().splitlines()
-    header_idx = -1
-    for i, line in enumerate(lines):
-        if "Name" in line and "Id" in line:
-            header_idx = i
-            break
-    if header_idx != -1 and header_idx + 2 < len(lines):
-        for line in lines[header_idx + 2:]:
-            parts = re.split(r"\s{2,}", line.strip())
-            if len(parts) >= 2:
-                name, pkg_id = parts[0], parts[1]
-                version = parts[2] if len(parts) > 2 else ""
-                results.append({"name": name, "id": pkg_id, "version": version})
-                if len(results) >= limit:
-                    break
-    return results
-
-
-def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: str | None = None) -> Draft:
-    """Convert winget metadata dictionary into a TXA Draft object."""
+def convert_winget_to_draft(data: dict[str, Any], namespace: str = "TXAVL", override_id: str | None = None) -> Draft:
+    """Convert WinGet metadata dictionary into a TXA Draft object."""
     pkg_id_raw = data.get("PackageIdentifier") or data.get("Id") or "App.Tool"
     raw_name = data.get("PackageName") or data.get("Name") or pkg_id_raw.split(".")[-1]
     raw_version = str(data.get("Version") or data.get("PackageVersion") or "1.0.0")
 
-    version = normalize_version(raw_version)
+    version = wg.normalize_version(raw_version)
 
     if override_id:
         pkg_id = override_id
     else:
-        app_part = pkg_id_raw.split(".")[-1]
-        pascal_app = pascal(app_part)
-        digits = {"0": "Zero", "1": "One", "2": "Two", "3": "Three", "4": "Four", "5": "Five", "6": "Six", "7": "Seven", "8": "Eight", "9": "Nine"}
-        if pascal_app and pascal_app[0] in digits:
-            pascal_app = digits[pascal_app[0]] + pascal_app[1:]
-        pascal_app = re.sub(r"^[^A-Za-z0-9]+", "", pascal_app) or "App"
+        pascal_app = wg.derive_txa_app_name(pkg_id_raw, raw_name)
         pkg_id = f"{namespace}.{pascal_app}"
 
     name = (raw_name.strip() or "Tool")[:64]
@@ -283,7 +89,6 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
     if description and summary and (description.lower() == summary.lower() or len(description) <= len(summary)):
         description = None
     elif description:
-        import textwrap
         wrapped_lines = []
         for paragraph in description.split("\n"):
             p = paragraph.strip()
@@ -312,7 +117,9 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
 
     lic_url = str(data.get("License Url") or "").strip()
     if not lic_url.startswith("https://"):
-        lic_url = homepage if (homepage and lic_name in licenses.NEEDS_URL) else None
+        lic_url = homepage if (homepage and lic_name in licenses.NEEDS_URL) else (
+            "https://github.com/TXAVL/txa-repo" if lic_name in licenses.NEEDS_URL else None
+        )
 
     moniker = data.get("Moniker")
     alias = sanitize_alias(moniker)
@@ -326,7 +133,7 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
         raw_tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
     cleaned_tags = []
     for t in raw_tags:
-        ct = clean_tag(t)
+        ct = wg.clean_tag(t)
         if ct and ct not in cleaned_tags:
             cleaned_tags.append(ct)
         if len(cleaned_tags) >= 16:
@@ -340,10 +147,9 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
         if not url.startswith("https://"):
             continue
         sha = tinfo["sha256"]
-        winget_type = tinfo.get("type", "exe").lower()
-        engine = ENGINE_MAP.get(winget_type, "exe")
+        engine = tinfo.get("engine") or wg.ENGINE_MAP.get(tinfo.get("type", "exe").lower(), "exe")
 
-        switches = dict(DEFAULT_SWITCHES.get(engine, {}))
+        switches = dict(wg.DEFAULT_SWITCHES.get(engine, {}))
         custom_sw = tinfo.get("switches", {})
         if isinstance(custom_sw, dict):
             if custom_sw.get("Silent"):
@@ -368,7 +174,7 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
             portable=portable_dict,
         ))
 
-    draft = Draft(
+    return Draft(
         package_id=pkg_id,
         version=version,
         name=name,
@@ -383,7 +189,6 @@ def convert_winget_to_draft(data: dict, namespace: str = "TXAVL", override_id: s
         tags=cleaned_tags,
         targets=target_drafts,
     )
-    return draft
 
 
 def validate_draft(draft: Draft) -> list[str]:
@@ -413,8 +218,12 @@ def save_draft_manifests(draft: Draft, root_dir: Path, dry_run: bool = False) ->
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import WinGet packages into TXA repository.")
-    parser.add_argument("packages", nargs="*", help="WinGet Package IDs (e.g. 7zip.7zip, Git.Git)")
+    parser = argparse.ArgumentParser(description="Import WinGet packages or installed apps into TXA repository.")
+    parser.add_argument("packages", nargs="*", help="App names (from `txapm list --all`) or WinGet Package IDs")
+    parser.add_argument("-i", "--from-installed", action="store_true",
+                        help="Scan installed apps on this PC (like `txapm list --all`) and import missing ones")
+    parser.add_argument("--txacreate", action="store_true",
+                        help="Run full `txacreate new` pipeline (downloads binary, verifies SHA-256 & PE)")
     parser.add_argument("-s", "--search", help="Search WinGet for matching package names/monikers")
     parser.add_argument("-n", "--namespace", default="TXAVL", help="Namespace for TXA packages (default: TXAVL)")
     parser.add_argument("--id", help="Override TXA Package ID (e.g. TXAVL.MyTool)")
@@ -422,47 +231,77 @@ def main() -> None:
     parser.add_argument("--build-api", action="store_true", help="Build static txa.v1 REST API after import")
     parser.add_argument("--api-out", default="dist/api", help="Destination directory for built API (default: dist/api)")
     parser.add_argument("--dry-run", action="store_true", help="Preview generated manifests without writing to disk")
+    parser.add_argument("-y", "--yes", action="store_true", help="Automatically import all without prompting")
     args = parser.parse_args()
 
     repo_root = REPO_ROOT
 
+    # If --txacreate is requested, delegate directly to txacreate CLI
+    if args.txacreate:
+        from txa.create.cli import main as txacreate_main
+        cli_args = ["new", "--out", str(repo_root), "-y"]
+        if args.dry_run:
+            cli_args.append("--dry-run")
+        if args.from_installed:
+            cli_args.append("--from-installed")
+        if args.id:
+            cli_args += ["--id", args.id]
+        cli_args += list(args.packages)
+        sys.exit(txacreate_main(cli_args))
+
     # Search mode
     if args.search:
-        print(f"\nSearching WinGet for '{console.paint(args.search, 'cyan')}'...")
-        results = search_winget(args.search)
-        if not results:
-            print("No packages found.")
-            return
-        print(f"\nFound {len(results)} package(s):")
-        print(f"{'Id':<40} {'Version':<15} {'Name'}")
-        print("-" * 75)
-        for r in results:
-            print(f"{console.paint(r['id'], 'green'):<49} {r['version']:<15} {r['name']}")
-        print(f"\nTo import a package, run:\n  python scripts/winget-import.py {results[0]['id']}\n")
+        wg_id = wg.resolve_to_winget_id(args.search)
+        print(f"\nBest match for '{console.paint(args.search, 'cyan')}': {console.paint(wg_id or 'none', 'green', 'bold')}")
         return
 
-    if not args.packages:
+    queries = list(args.packages)
+    if args.from_installed:
+        print(f"\nScanning installed programs on this PC not yet in TXA…")
+        untracked = wg.scan_installed_winget_packages()
+        if not untracked:
+            print(console.paint("✓ All detected WinGet programs on this machine are already in TXA!", "green"))
+            return
+        print(f"\nFound {len(untracked)} installed program(s) available on WinGet:")
+        print(f"{'#':<4} {'Installed Name':<38} {'WinGet Id':<36} {'Version'}")
+        print("-" * 92)
+        for idx, item in enumerate(untracked, 1):
+            print(f"{idx:<4} {item['name'][:37]:<38} {console.paint(item['id'], 'cyan'):<45} {item['version']}")
+
+        if args.yes or not sys.stdin.isatty():
+            queries.extend(item["id"] for item in untracked)
+        else:
+            choice = console.ask("\nEnter numbers to import (e.g. 1,3,5 or 'all')", "all").strip().lower()
+            if choice == "all":
+                queries.extend(item["id"] for item in untracked)
+            else:
+                idxs = [int(x.strip()) for x in choice.split(",") if x.strip().isdigit()]
+                queries.extend(untracked[i - 1]["id"] for i in idxs if 1 <= i <= len(untracked))
+
+    if not queries:
         parser.print_help()
-        print("\nTip: Run with --search <keyword> to discover WinGet package IDs.")
+        print("\nExamples:")
+        print("  .\\scripts\\winget-import.ps1 --from-installed -y")
+        print("  .\\scripts\\winget-import.ps1 \"GitHub CLI\" \"GitHub Desktop\" \"Steam\"")
+        print("  txacreate new \"GitHub CLI\" --dry-run")
+        print("  txacreate new --from-installed --dry-run")
         return
 
     out_dir = Path(args.out)
     if not out_dir.is_absolute():
         out_dir = (repo_root / args.out).resolve()
-
-    if out_dir.name == "manifests":
-        manifest_root = out_dir.parent
-    else:
-        manifest_root = out_dir
+    manifest_root = out_dir.parent if out_dir.name == "manifests" else out_dir
 
     success_count = 0
-    imported_ids = []
-
-    for pkg_id in args.packages:
-        print(f"\nFetching WinGet package '{console.paint(pkg_id, 'cyan')}'...")
-        data = query_winget_cli(pkg_id)
+    for query in queries:
+        print(f"\nResolving '{console.paint(query, 'cyan')}'...")
+        wg_id = wg.resolve_to_winget_id(query)
+        if not wg_id:
+            print(console.paint(f"[-] Could not resolve '{query}' on WinGet.", "red"))
+            continue
+        data = wg.query_winget_package(wg_id)
         if not data:
-            print(console.paint(f"[-] Could not find or retrieve installer info for '{pkg_id}'.", "red"))
+            print(console.paint(f"[-] No supported HTTPS installer found for '{wg_id}'.", "red"))
             continue
 
         draft = convert_winget_to_draft(data, namespace=args.namespace, override_id=args.id)
@@ -475,17 +314,13 @@ def main() -> None:
 
         dest_dir = save_draft_manifests(draft, manifest_root, dry_run=args.dry_run)
         if args.dry_run:
-            print(console.paint(f"[DRY-RUN] Validated successfully -> {dest_dir}", "yellow"))
-            for fn, content in draft.render().items():
-                print(f"\n--- {fn} ---")
-                print(content[:300] + "...")
+            print(console.paint(f"[DRY-RUN] {wg_id} -> {draft.ref} ({dest_dir})", "yellow"))
         else:
-            print(console.paint(f"[+] Successfully converted -> {draft.ref}", "green"))
+            print(console.paint(f"[+] {wg_id} -> {draft.ref}", "green"))
             print(f"    Location: {dest_dir}")
             print(f"    Targets:  {', '.join(t.arch + ' (' + t.engine + ')' for t in draft.targets)}")
             if draft.alias:
                 print(f"    Alias:    txapm install {draft.alias}")
-            imported_ids.append(draft.package_id)
             success_count += 1
 
     if args.build_api and success_count > 0 and not args.dry_run:
@@ -497,9 +332,6 @@ def main() -> None:
         api_target.mkdir(parents=True, exist_ok=True)
         stats = build_api(manifest_root, api_target)
         print(console.paint(f"[+] API build complete: {stats['packages']} packages indexed.", "green"))
-        print(f"\nTo use this repository in txapm, run:")
-        print(f"  txapm source add myrepo {manifest_root}")
-        print(f"  txapm search -s myrepo")
 
 
 if __name__ == "__main__":

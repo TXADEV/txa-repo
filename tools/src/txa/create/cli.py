@@ -404,7 +404,87 @@ def _show_path(path: Path) -> str:
     return "%USERPROFILE%" + text[len(home):] if text.lower().startswith(home.lower()) else text
 
 
+def _clone_args_for_query(args, query: str):
+    """Resolve a non-URL package name or WinGet ID into a cloned args namespace with URLs + metadata."""
+    import copy
+    from txa.create import winget
+
+    console.say(f"→ resolving '{console.paint(query, 'cyan', 'bold')}' via WinGet…")
+    wg_id = winget.resolve_to_winget_id(query)
+    if not wg_id:
+        _die(f"could not find '{query}' on WinGet - pass a direct https:// installer URL instead")
+        return None
+    data = winget.query_winget_package(wg_id)
+    if not data:
+        _die(f"found '{wg_id}' on WinGet, but no supported HTTPS installer was available")
+        return None
+    cloned = copy.deepcopy(args)
+    namespace = config.get("namespace")
+    urls = winget.populate_args_from_winget(cloned, data, namespace)
+    if not urls:
+        _die(f"no HTTPS installer URLs found for '{wg_id}'")
+        return None
+    cloned.urls = urls
+    cloned.yes = True
+    console.say(f"✓ matched {console.paint(wg_id, 'green', 'bold')} → {console.paint(cloned.id, 'bold')} "
+                f"{cloned.version} ({len(urls)} installer URL(s))")
+    return cloned
+
+
 def cmd_new(args) -> int:
+    if getattr(args, "from_installed", False):
+        from txa.create import winget
+
+        console.say("→ scanning installed programs not yet in TXA…")
+        untracked = winget.scan_installed_winget_packages()
+        if not untracked:
+            console.say("✓ all detected WinGet programs on this machine are already in TXA!")
+            return 0
+        print(console.head(f"\n{'#':<4} {'Name':<38} {'WinGet Id':<36} {'Version'}"))
+        for idx, item in enumerate(untracked, 1):
+            print(f"{console.paint(f'{idx}.', 'yellow'):<13} {item['name'][:38]:<38} "
+                  f"{console.paint(item['id'], 'cyan'):<45} {item['version']}")
+        if args.yes or not sys.stdin.isatty():
+            picked = untracked
+        else:
+            raw = console.ask("\nWhich program(s) to add? (e.g. 1,3,5 or 'all')", "all").strip().lower()
+            if raw == "all":
+                picked = untracked
+            else:
+                indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+                picked = [untracked[i - 1] for i in indices if 1 <= i <= len(untracked)]
+        if not picked:
+            return _die("no programs selected")
+        rc = 0
+        for item in picked:
+            cloned = _clone_args_for_query(args, item["id"])
+            if not cloned or _cmd_new_single(cloned) != 0:
+                rc = 1
+        return rc
+
+    if not args.urls:
+        return _die("pass an installer URL, a package name (e.g. `txacreate new \"GitHub CLI\"`), or `--from-installed`")
+
+    # If any positional argument is not an https:// URL, treat positional args as package queries
+    if any(not u.lower().startswith("https://") for u in args.urls):
+        rc = 0
+        for query in args.urls:
+            if query.lower().startswith("https://"):
+                import copy
+                cloned = copy.deepcopy(args)
+                cloned.urls = [query]
+                if _cmd_new_single(cloned) != 0:
+                    rc = 1
+            else:
+                cloned = _clone_args_for_query(args, query)
+                if not cloned or _cmd_new_single(cloned) != 0:
+                    rc = 1
+        return rc
+
+    return _cmd_new_single(args)
+
+
+def _cmd_new_single(args) -> int:
     upstream = config.get("upstream")
     namespace = config.get("namespace")
     interactive = sys.stdin.isatty() and not args.yes
@@ -757,9 +837,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("value", nargs="?")
     p.set_defaults(func=cmd_config)
 
-    p = sub.add_parser("new", help="create a release from installer URL(s) and open a pull request")
-    p.add_argument("urls", nargs="+", metavar="URL", help="HTTPS URL of an .exe/.msi (one per architecture)")
+    p = sub.add_parser("new", help="create a release from installer URL(s), app name(s), or --from-installed")
+    p.add_argument("urls", nargs="*", metavar="URL_OR_NAME", help="HTTPS URL(s), WinGet ID(s), or app name(s) from `txapm list --all`")
     p.add_argument("--id", help="Namespace.AppName (default: <namespace>.<ProductName>)")
+    p.add_argument("-i", "--from-installed", action="store_true", help="scan installed programs (like `txapm list --all`) and auto-create missing packages")
     _release_options(p)
     p.set_defaults(func=cmd_new)
 
