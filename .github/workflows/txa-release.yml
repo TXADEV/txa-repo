@@ -83,8 +83,13 @@ jobs:
         working-directory: dist
         run: sha256sum *.zip | tee SHA256SUMS.txt
 
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/*.zip dist/SHA256SUMS.txt install.ps1 --title "TXA $TAG" --generate-notes
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip dist/SHA256SUMS.txt install.ps1 --clobber
+          else
+            gh release create "$TAG" dist/*.zip dist/SHA256SUMS.txt install.ps1 --title "TXA $TAG" --generate-notes
+          fi
