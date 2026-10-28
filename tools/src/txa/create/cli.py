@@ -170,19 +170,22 @@ ENGINE_NAMES = {
 
 def _describe_installer(dl, found, engine: str, arch: str) -> None:
     """What kind of file this is, how TXA will run it, and for which CPU - in plain words."""
+    from txa.core import i18n
+
     paint = console.paint
     print(f"  {paint(dl.path.name, 'bold')}  {dl.bytes / 1048576:.2f} MiB")
     print(f"    {console.label('SHA-256', 11)}{paint(dl.sha256, 'gray')}")
-    print(f"    {console.label('type', 11)}{paint(ENGINE_NAMES.get(engine, engine), 'magenta', 'bold')}")
+    print(f"    {console.label('type', 11)}{paint(i18n.tr(ENGINE_NAMES.get(engine, engine)), 'magenta', 'bold')}")
     if engine == "portable":
         spec = found.portable or {}
-        print(f"    {console.label('install', 11)}unpacked into the TXA apps folder, PATH gets: {', '.join(spec.get('path', [])) or '-'}")
+        msg = i18n.tr(f"unpacked into the TXA apps folder, PATH gets: {', '.join(spec.get('path', [])) or '-'}")
+        print(f"    {console.label('install', 11)}{msg}")
     else:
         switches = engines.DEFAULT_SWITCHES.get(engine, {}).get("silent")
-        print(f"    {console.label('silent', 11)}{paint(switches, 'cyan') if switches else paint('you must give --silent', 'yellow')}")
+        print(f"    {console.label('silent', 11)}{paint(switches, 'cyan') if switches else paint(i18n.tr('you must give --silent'), 'yellow')}")
     wrapper = ""
     if found.machine and found.machine != arch and found.format == "pe":
-        wrapper = paint(f"  (the installer program itself is {found.machine}, that is normal)", "gray")
+        wrapper = paint("  " + i18n.tr(f"(the installer program itself is {found.machine}, that is normal)"), "gray")
     print(f"    {console.label('CPU', 11)}{paint(arch, 'yellow', 'bold')}{wrapper}")
 
 
@@ -404,6 +407,15 @@ def _show_path(path: Path) -> str:
     return "%USERPROFILE%" + text[len(home):] if text.lower().startswith(home.lower()) else text
 
 
+def _already_published_versions(package_id: str) -> list[str]:
+    """Return published versions of ``package_id`` across configured sources (or empty list)."""
+    try:
+        from txa.pm.source import Source
+        return Source().versions(package_id)
+    except Exception:
+        return []
+
+
 def _clone_args_for_query(args, query: str):
     """Resolve a non-URL package name or WinGet ID into a cloned args namespace with URLs + metadata."""
     import copy
@@ -426,6 +438,7 @@ def _clone_args_for_query(args, query: str):
         return None
     cloned.urls = urls
     cloned.yes = True
+    cloned._from_query = True
     console.say(f"✓ matched {console.paint(wg_id, 'green', 'bold')} → {console.paint(cloned.id, 'bold')} "
                 f"{cloned.version} ({len(urls)} installer URL(s))")
     return cloned
@@ -489,6 +502,16 @@ def _cmd_new_single(args) -> int:
     interactive = sys.stdin.isatty() and not args.yes
     guided = interactive and sys.stdout.isatty()
     total = (3 if args.dry_run else 4) if guided else (4 if args.dry_run else 5)
+
+    # Fast pre-flight before downloading 100+ MB of installers when id & version are already known
+    if getattr(args, "id", None) and getattr(args, "version", None) and not getattr(args, "force", False):
+        published_pre = _already_published_versions(args.id)
+        if args.version in published_pre:
+            if getattr(args, "_from_query", False) or getattr(args, "from_installed", False):
+                console.say(f"✓ {args.id} {args.version} is already published in TXA - skipped (use --force to overwrite)")
+                return 0
+            return _die(f"{args.id} {args.version} is already published - bump the version (or pass --force)")
+
     if not args.dry_run:
         console.say(f"→ target repository {upstream}")
 
@@ -539,8 +562,8 @@ def _cmd_new_single(args) -> int:
         problem = _fill_from_flags(args, draft, items, interactive)
         if problem:
             return _die(problem)
-    if published and draft.version in published:
-        return _die(f"{draft.package_id} {draft.version} is already published - bump the version")
+    if published and draft.version in published and not args.force:
+        return _die(f"{draft.package_id} {draft.version} is already published - bump the version (or pass --force)")
 
     # 3. cards: write, preview, let the user change their mind, save
     console.stage(3, total, "Preview and save the TXA cards" if guided else "Writing the TXA cards")

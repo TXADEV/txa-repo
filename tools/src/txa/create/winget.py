@@ -37,7 +37,7 @@ DEFAULT_SWITCHES = {
 _TOP_KEY_RE = re.compile(r"^([A-Za-z0-9 ]+):\s*(.*)$")
 _TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,31}$")
 
-# Skip system runtimes / store extensions / Steam game entries when scanning installed programs
+# Skip system runtimes / store extensions / MSIX-only built-ins when scanning installed programs
 _SKIP_ID_PREFIXES = (
     "ARP\\",
     "MSIX\\",
@@ -48,6 +48,8 @@ _SKIP_ID_PREFIXES = (
     "Microsoft.DotNet.Native.",
     "Microsoft.CLRTypesSQLServer.",
     "Microsoft.AppInstaller",
+    "Microsoft.WindowsTerminal",
+    "Microsoft.Teams",
     "Python.Launcher",
     "Python.PythonInstallManager",
 )
@@ -70,6 +72,8 @@ def derive_txa_app_name(pkg_id_raw: str, raw_name: str) -> str:
             candidate = f"{parts[0]} {parts[1]}"
         else:
             candidate = clean_query_name(raw_name)
+            if "dotnet" in pkg_id_raw.lower() and "net" not in candidate.lower():
+                candidate = re.sub(r"^Microsoft\b", "Microsoft NET", candidate, flags=re.I)
     else:
         candidate = app_part
     pascal_app = pascal(candidate)
@@ -83,7 +87,7 @@ def clean_query_name(name: str) -> str:
     """Strip version suffixes and parentheticals from installed program display names."""
     s = name.strip()
     s = re.sub(r"\s*\((?:User|Machine|x64|x86|64-bit|32-bit|remove only)\)\s*", " ", s, flags=re.I)
-    s = re.sub(r"\s+(?:version\s+)?v?\d+(?:\.\d+)+[^\s]*.*$", "", s, flags=re.I)
+    s = re.sub(r"(?:\s*[-–—]\s*|\s+)(?:version\s+)?v?\d+(?:\.\d+)+[^\s]*.*$", "", s, flags=re.I)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -346,8 +350,14 @@ def resolve_to_winget_id(query: str) -> str | None:
 
 def scan_installed_winget_packages(include_existing: bool = False, repo_root=None) -> list[dict[str, str]]:
     """Scan installed programs via ``winget list`` and filter out ones already in TXA."""
+    from pathlib import Path
+    from txa.core.manifest import find_repo_root
+
     existing_ids: set[str] = set()
     existing_names: set[str] = set()
+    ns = config.get("namespace")
+    if repo_root is None:
+        repo_root = find_repo_root(Path.cwd())
     if not include_existing:
         try:
             from txa.pm.source import Sources
@@ -363,12 +373,11 @@ def scan_installed_winget_packages(include_existing: bool = False, repo_root=Non
         except Exception:
             pass
         if repo_root is not None:
-            from pathlib import Path
-            ns_dir = Path(repo_root) / "manifests" / config.get("namespace")[0].lower() / config.get("namespace")
+            ns_dir = Path(repo_root) / "manifests" / ns[0].lower() / ns
             if ns_dir.is_dir():
                 for child in ns_dir.iterdir():
                     if child.is_dir():
-                        existing_ids.add(f"{config.get('namespace')}.{child.name}".lower())
+                        existing_ids.add(f"{ns}.{child.name}".lower())
 
     cmd = ["winget", "list", "--disable-interactivity", "--nowarn"]
     try:
@@ -389,15 +398,17 @@ def scan_installed_winget_packages(include_existing: bool = False, repo_root=Non
         if pkg_id.lower() in seen_ids:
             continue
 
-        app_slug = pkg_id.split(".")[-1].lower()
+        non_digit_parts = [p.lower() for p in pkg_id.split(".") if p and not p.isdigit()]
+        app_slug = non_digit_parts[-1] if non_digit_parts else pkg_id.split(".")[-1].lower()
         derived_app = derive_txa_app_name(pkg_id, name).lower()
+        derived_no_digits = re.sub(r"\d+$", "", derived_app)
         name_clean = clean_query_name(name).lower()
         if not include_existing:
             if name.lower() in existing_names or name_clean in existing_names or app_slug in existing_names:
                 continue
-            if f"{config.get('namespace')}.{app_slug}".lower() in existing_ids:
+            if f"{ns}.{app_slug}".lower() in existing_ids:
                 continue
-            if f"{config.get('namespace')}.{derived_app}".lower() in existing_ids:
+            if f"{ns}.{derived_app}".lower() in existing_ids or f"{ns}.{derived_no_digits}".lower() in existing_ids:
                 continue
 
         seen_ids.add(pkg_id.lower())
