@@ -15,19 +15,21 @@ from txa.create.draft import Draft, Item
 _TAG = re.compile(r"^[a-z0-9][a-z0-9-]{1,31}$")
 _MIN_BUILDS = ["10.0.17763", "10.0.19044", "10.0.19045", "10.0.22000", "10.0.22621", "10.0.26100"]
 ARCHES = [
-    console.Option("x86", "x86", "32-bit Intel/AMD software (also runs on 64-bit PCs)"),
-    console.Option("x64", "x64", "64-bit Intel/AMD software"),
-    console.Option("arm64", "arm64", "software built for Windows on ARM"),
+    console.Option("x64", "X64", "64-bit Intel/AMD software"),
+    console.Option("x86", "X86", "32-bit Intel/AMD software"),
+    console.Option("arm64", "Arm64", "software built for Windows on ARM"),
+    console.Option("arm", "Arm", "32-bit Windows on ARM"),
+    console.Option("neutral", "Neutral", "architecture independent"),
 ]
 
 
 def docs_url() -> str:
-    return f"https://github.com/{config.get('upstream')}/tree/main/examples"
+    return "https://aka.ms/winget-manifest-schema"
 
 
 def intro() -> None:
     paint = console.paint
-    print(f"\nFor additional information about the restrictions for each field, visit {paint(docs_url(), 'cyan')}")
+    print(f"\nFor information about the restrictions for each field, visit {paint(docs_url(), 'cyan')}")
     print(f"Press ENTER to submit the value for each question including accepting the {paint('(default)', 'gray')} value.")
     print("Please enter values for the following fields:\n")
 
@@ -81,20 +83,28 @@ def ask_arch(item: Item) -> str:
     values = [o.value for o in ARCHES]
     options = [console.Option(o.value, o.label, o.note + ("  <- detected from the file" if item.arch_known and o.value == item.arch else ""))
                for o in ARCHES]
-    return console.choose("The installer target architecture", "arch", options, values.index(item.arch) if item.arch in values else 1).value
+    return console.choose("The installer target architecture", "Architecture", options, values.index(item.arch) if item.arch in values else 0).value
 
 
 def ask_license(draft: Draft) -> None:
     """Pick the license from a list with an explanation next to each entry; Freeware/Proprietary also need a link."""
-    options = [console.Option(name, name, note) for name, note in licenses.COMMON]
-    options.append(console.Option("other", "Other...", "any other SPDX identifier, for example Zlib or EPL-2.0"))
+    license_options = [
+        console.Option("MIT", "MIT", "MIT License - Permissive, limited liability"),
+        console.Option("Apache-2.0", "Apache-2.0", "Apache 2.0 - Permissive with patent grant"),
+        console.Option("GPL-3.0-or-later", "GPL-3.0-or-later", "GNU GPL v3 - Copyleft, requires source code"),
+        console.Option("Proprietary", "Proprietary", "Proprietary - Closed-source, commercial (requires terms URL)"),
+        console.Option("Freeware", "Freeware", "Freeware - Free to use, closed-source"),
+        console.Option("BSD-3-Clause", "BSD-3-Clause", "BSD 3-Clause - Permissive with attribution"),
+        console.Option("MPL-2.0", "MPL-2.0", "Mozilla Public License 2.0 - File-level copyleft"),
+        console.Option("other", "Other...", "any other SPDX identifier, for example Zlib or EPL-2.0"),
+    ]
     current = licenses.normalize(draft.license_name) if draft.license_name else None
-    names = [o.value for o in options]
+    names = [o.value for o in license_options]
     if current and current not in names:
-        options.insert(0, console.Option(current, current, "found for this project"))
+        license_options.insert(0, console.Option(current, current, "found for this project"))
         names.insert(0, current)
     default = names.index(current) if current in names else 0
-    picked = console.choose("The package license", "license", options, default).value
+    picked = console.choose("The package license", "License", license_options, default).value
     if picked == "other":
         def known(value: str) -> str | None:
             if licenses.normalize(value):
@@ -102,10 +112,10 @@ def ask_license(draft: Draft) -> None:
             hint = licenses.suggest(value)
             return f"'{value}' is not a known license" + (f" - did you mean {', '.join(hint)}?" if hint else "")
 
-        picked = licenses.normalize(console.field("The license identifier", "Zlib", "license", "", validate=known))
+        picked = licenses.normalize(console.field("The license identifier", "Zlib", "License", "", validate=known))
     draft.license_name = picked
     if licenses.needs_url(picked):
-        draft.license_url = console.field("The link to the license terms", "https://example.com/terms", "license.url",
+        draft.license_url = console.field("The link to the license terms", "https://example.com/terms", "LicenseUrl",
                                           draft.license_url or "", validate=_https)
 
 
@@ -186,10 +196,11 @@ def recap(draft: Draft, items: list[Item]) -> None:
     paint = console.paint
     for item in items:
         print(f"\nAdditional metadata needed for installer from {paint(item.url, 'cyan')}")
-        print(f"The installer target architecture [arch] value is: {paint(item.arch, 'cyan', 'bold')}")
-    for label, key, value in (("The publisher name", "publisher", draft.publisher), ("The package name", "name", draft.name),
-                              ("The package license", "license", draft.license_name),
-                              ("The short package description", "summary", draft.summary)):
+        print(f"The installer target architecture [Architecture] value is: {paint(item.arch.upper() if item.arch != 'neutral' else 'Neutral', 'cyan', 'bold')}")
+    for label, key, value in (("The publisher name", "Publisher", draft.publisher),
+                              ("The package name", "PackageName", draft.name),
+                              ("The package license", "License", draft.license_name),
+                              ("The short package description", "ShortDescription", draft.summary)):
         print(f"{label} [{key}] value is: {paint(value, 'cyan', 'bold')}")
     print()
 
@@ -201,21 +212,21 @@ def collect(draft: Draft, items: list[Item], *, lock_id: bool = False, namespace
     if first_time:
         intro()
     if lock_id:
-        print(f"The package unique identifier [package.id] value is: {console.paint(draft.package_id, 'cyan', 'bold')}")
+        print(f"The package unique identifier [PackageIdentifier] value is: {console.paint(draft.package_id, 'cyan', 'bold')}")
     else:
-        draft.package_id = console.field("The package unique identifier", "TXAVL.HelloTool", "package.id", draft.package_id,
+        draft.package_id = console.field("The package unique identifier", "Microsoft.VisualStudio", "PackageIdentifier", draft.package_id,
                                          validate=lambda v: _check_id(v, namespaces))
     if github and first_time:
-        console.say("→ GitHub URL detected. The CLI has automatically filled some manifest fields.")
-    draft.version = console.field("The package version", "1.2.3", "package.version", draft.version, validate=_check_version)
-    draft.lang = console.field("The package meta-data default locale", "en-US", "locale.default", draft.lang, validate=_check_lang)
+        console.say("GitHub URL detected. The CLI has automatically filled some manifest fields.")
+    draft.version = console.field("The package version", "1.2.3.4", "PackageVersion", draft.version, validate=_check_version)
+    draft.lang = console.field("The package meta-data default locale", "en-US", "DefaultLocale", draft.lang, validate=_check_lang)
     for item in items:
         print(f"\nAdditional metadata needed for installer from {console.paint(item.url, 'cyan')}")
         _installer_questions(item)
-    draft.publisher = console.field("The publisher name", "Mozilla", "publisher", draft.publisher)
-    draft.name = console.field("The package name", "Firefox", "name", draft.name)
+    draft.publisher = console.field("The publisher name", "Microsoft", "Publisher", draft.publisher)
+    draft.name = console.field("The package name", "Visual Studio", "PackageName", draft.name)
     ask_license(draft)
-    draft.summary = console.field("The short package description", "A fast and private web browser", "summary",
+    draft.summary = console.field("The short package description", "", "ShortDescription",
                                   draft.summary, validate=_check_summary)
     draft.author = draft.author or draft.publisher
     recap(draft, items)

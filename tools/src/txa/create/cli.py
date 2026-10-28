@@ -437,7 +437,7 @@ def _clone_args_for_query(args, query: str):
         _die(f"no HTTPS installer URLs found for '{wg_id}'")
         return None
     cloned.urls = urls
-    cloned.yes = True
+    cloned.yes = getattr(args, "yes", False)
     cloned._from_query = True
     console.say(f"✓ matched {console.paint(wg_id, 'green', 'bold')} → {console.paint(cloned.id, 'bold')} "
                 f"{cloned.version} ({len(urls)} installer URL(s))")
