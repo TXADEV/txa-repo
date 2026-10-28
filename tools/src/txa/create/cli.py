@@ -385,8 +385,14 @@ def _preview(draft: Draft, rendered: dict[str, str], root: Path, published: list
     """Print the three cards, then 'Manifest validation succeeded: True/False' like the reference flow."""
     paint = console.paint
     print("\nGenerating a preview of your manifests...")
-    for title, filename in (("Core card", "core.txa.yaml"), ("Build card", "build.txa.yaml"),
-                            ("About card", f"about.{draft.lang}.txa.yaml")):
+    preview_items = [
+        ("Core card", "core.txa.yaml"),
+        ("Build card", "build.txa.yaml"),
+        ("About card", f"about.{draft.lang}.txa.yaml"),
+    ]
+    if "about.vi-VN.txa.yaml" in rendered and draft.lang != "vi-VN":
+        preview_items.append(("About card (vi-VN)", "about.vi-VN.txa.yaml"))
+    for title, filename in preview_items:
         print(f"\n{paint(title + ' preview:', 'bold', 'cyan')}")
         print(rendered.get(filename, ""))
     ctx = init_local([root / draft.directory], offline=True)
@@ -583,7 +589,8 @@ def _cmd_new_single(args) -> int:
         if broken and not args.force:
             return _die("the cards have problems - fix them, or pass --force to open the PR anyway")
         save_root = Path(args.out) if args.out else Path.home() / "manifests"
-        saved = save_root / draft.directory
+        rel_dir = draft.directory.relative_to("manifests") if draft.directory.parts[0] == "manifests" and save_root.name == "manifests" else draft.directory
+        saved = save_root / rel_dir
         saved.mkdir(parents=True, exist_ok=True)
         for filename, text in rendered.items():
             (saved / filename).write_text(text, "utf-8", newline="\n")

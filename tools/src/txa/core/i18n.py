@@ -515,6 +515,7 @@ _SUMMARIES_VI: dict[str, str] = {
     "coccoc": "Trình duyệt web nhân Chromium tốc độ cao dành cho người Việt.",
     "discord": "Ứng dụng trò chuyện giọng nói, video và nhắn tin phổ biến dành cho cộng đồng và game thủ.",
     "edge": "Trình duyệt web đa nền tảng hiệu năng cao và tiết kiệm tài nguyên của Microsoft.",
+    "everything": "Phần mềm tìm kiếm tệp tin và thư mục siêu tốc theo tên trên Windows.",
     "ffmpeg": "Bộ công cụ dòng lệnh toàn diện để ghi, chuyển đổi định dạng và phát trực tuyến âm thanh/video.",
     "firefox": "Trình duyệt web mã nguồn mở nhanh, bảo mật và tôn trọng quyền riêng tư từ Mozilla.",
     "garena": "Nền tảng kết nối, quản lý và khởi chạy các tựa game trực tuyến của Garena.",

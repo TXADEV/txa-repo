@@ -149,6 +149,27 @@ class Draft:
         for lang, translated in self.extra_abouts.items():
             if lang != self.lang:
                 cards[about_file(lang)] = {**translated, "ref": self.ref, "license": about["license"]}
+
+        # Auto-generate vi-VN about card if default is en-US
+        if self.lang.lower().startswith("en") and "vi-VN" not in self.extra_abouts:
+            from txa.core import i18n
+            vi_summary = i18n._SUMMARIES_VI.get(self.package_id.split(".")[-1].lower())
+            if not vi_summary:
+                out_sum = self.summary
+                for pat, repl in i18n._SUMMARY_PATTERNS_VI:
+                    out_sum = pat.sub(repl, out_sum)
+                if out_sum != self.summary and len(out_sum) >= 10:
+                    vi_summary = out_sum
+            if vi_summary:
+                vi_about = {
+                    "txa": 1, "kind": "about", "ref": self.ref, "lang": "vi-VN", "name": self.name,
+                    "publisher": self.publisher, "author": self.author, "summary": vi_summary,
+                }
+                if self.homepage:
+                    vi_about["homepage"] = self.homepage
+                vi_about["license"] = dict(about["license"])
+                cards[about_file("vi-VN")] = vi_about
+
         return cards
 
     def render(self) -> dict[str, str]:
