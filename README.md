@@ -75,6 +75,11 @@ txapm --version
 | Bỏ giữ / xem danh sách đang giữ | `txapm pin remove TXAVL.HelloTool` · `txapm pin list` |
 | Tải bộ cài + manifest về thư mục (mặc định Downloads) | `txapm download TXAVL.HelloTool -d D:\setup` |
 | Xem các kho nguồn | `txapm source` (xem mục [Kho nguồn riêng](#kho-nguồn-riêng)) |
+| Tìm kiếm / cài trực tiếp gói từ WinGet qua `txapm` | `txapm wg search <từ-khóa>` · `txapm wg install <id>` |
+| Kiểm tra sức khỏe hệ thống, kho nguồn, WinGet & cache | `txapm doctor` |
+| Dọn dẹp bộ cài tải tạm và file log cài đặt | `txapm clean` · `txapm clean --all` |
+| Xem danh sách hoặc đọc nội dung log cài đặt | `txapm log` · `txapm log <tên-gói>` |
+| Xem chi tiết vị trí cài đặt, PATH và nguồn của một gói | `txapm which <tên-gói>` |
 | Thông tin cài đặt, đường dẫn, tài khoản | `txapm --info` |
 
 Gói nào có tên ngắn (alias) thì gõ tên ngắn cũng được, ví dụ `txapm install hellotool`.
@@ -108,6 +113,17 @@ Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls`
 | `TXAVL.GIMP` | `gimp` | GIMP — phần mềm chỉnh sửa ảnh mã nguồn mở | 3.2.6 |
 | `TXAVL.OhMyPosh` | `ohmyposh` | Oh My Posh — tùy biến giao diện terminal | 31.9.1 |
 | `TXAVL.WinSCP` | `winscp` | WinSCP — SFTP, FTP, WebDAV client | 6.7.0 |
+| `TXAVL.PowerToys` | `powertoys` | Microsoft PowerToys — bộ công cụ tiện ích nâng cao cho Windows | 0.101.2362 |
+| `TXAVL.Postman` | `postman` | Postman — nền tảng phát triển và kiểm thử API | 12.34.2 |
+| `TXAVL.GitHubCLI` | `gh` | GitHub CLI — làm việc với GitHub từ dòng lệnh | 2.101.0 |
+| `TXAVL.GitHubDesktop` | `githubdesktop` | GitHub Desktop — quản lý Git trực quan | 3.6.7 |
+| `TXAVL.DockerDesktop` | `docker` | Docker Desktop — quản lý container trên Windows | 4.80.0 |
+| `TXAVL.CMake` | `cmake` | CMake — hệ thống quản lý build đa nền tảng | 4.4.2 |
+| `TXAVL.Blender` | `blender` | Blender — dựng hình và hoạt hình 3D mã nguồn mở | 5.2.0 |
+| `TXAVL.Steam` | `steam` | Steam — nền tảng quản lý và chơi game | 2.10.91 |
+| `TXAVL.UnityHub` | `unityhub` | Unity Hub — quản lý các phiên bản Unity Editor và dự án | 3.22.2 |
+| `TXAVL.Cloudflared` | `cloudflared` | Cloudflare Tunnel client | 2026.10.1 |
+| `TXAVL.VietTelex` | `viettelex` | VietTelex — bộ gõ tiếng Việt gọn nhẹ | 1.3.2 |
 
 Ví dụ: `txapm install vlc` hoặc `txapm install TXAVL.VLC`. Danh sách đầy đủ và mới nhất: `txapm search "" `
 hoặc xem [trang chỉ mục](https://txavl.github.io/txa-repo/). Mỗi gói chỉ trỏ tới link tải **chính thức** của nhà
@@ -230,15 +246,15 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 |---|---|
 | `txacreate new <link> --dry-run` | chỉ tạo file vào `./txa-out` để xem trước, không gửi gì |
 | `txacreate hash setup.exe` | xem SHA-256, kiến trúc, loại bộ cài của một file |
-| `txacreate submit <thư-mục>` | gửi PR cho một gói tự viết tay (đã có 3 file YAML) |
+| `txacreate submit <thư-mục>` | gửi PR cho thư mục gói, thư mục kho gốc (`C:\my-txa-repo`) hoặc thư mục API (`C:\my-txa-api`) |
 | `txacreate show TXAVL.HelloTool` | in nội dung manifest đang có trong kho |
 | `txacreate new <link> --check` | chạy thử cả 14 bước của bot ngay trên máy (chậm hơn: tải, CDN, chữ ký số) |
-| `txacreate validate <thư-mục>` | chạy 14 bước kiểm tra cho một gói viết tay |
+| `txacreate validate <thư-mục>` | chạy 14 bước kiểm tra cho thư mục gói hoặc cả kho |
 | `txacreate token` | xem tài khoản GitHub đang dùng (không bắt buộc) |
 | `txacreate token --store` | cấp quyền GitHub trước, không đợi tới lúc gửi |
 | `txacreate token --clear` | quên quyền đã lưu (đăng xuất) |
 | `txacreate new <link> -t <PAT>` | dùng Personal Access Token cho lần này, không lưu (hoặc đặt biến `TXA_TOKEN`) |
-| `.\scripts\winget-import.ps1 <id>` | chuyển đổi & nhập package từ WinGet vào TXA (xem [docs/winget-import.md](docs/winget-import.md)) |
+| `txacli <tên-hoặc-id>` | tìm kiếm, quét máy (`txacli -i`) & nhập gói từ WinGet vào TXA cực nhanh (xem [docs/winget-import.md](docs/winget-import.md)) |
 
 Chủ kho muốn bot hiện tên riêng (`txa-repo[bot]`) thay vì `github-actions` thì làm theo [docs/github-app.md](docs/github-app.md).
 

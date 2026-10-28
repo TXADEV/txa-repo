@@ -50,7 +50,7 @@ jobs:
 
       - name: Build executables
         run: |
-          foreach ($tool in 'txapm', 'txacreate') {
+          foreach ($tool in 'txapm', 'txacreate', 'txacli') {
             pyinstaller --noconfirm --onefile --console --name $tool --collect-data txa --hidden-import txa._build "packaging/$tool.py"
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
@@ -58,7 +58,9 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & dist/txacreate.exe --version
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Compress-Archive -Path dist/txapm.exe, dist/txacreate.exe -DestinationPath "txa-windows-${{ matrix.arch }}.zip"
+          & dist/txacli.exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Compress-Archive -Path dist/txapm.exe, dist/txacreate.exe, dist/txacli.exe -DestinationPath "txa-windows-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v7
         with:

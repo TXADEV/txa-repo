@@ -12,11 +12,13 @@ txapm search notepad
 txapm install TXAVL.HelloTool
 txapm upgrade --all
 txapm uninstall TXAVL.HelloTool
+txapm doctor
 ```
 
 | Command | Purpose |
 |---|---|
-| `txapm` | search, install, upgrade, uninstall, list, export/import packages |
+| `txapm` | search, install, upgrade, uninstall, list, export/import, doctor, clean, log, which, winget |
+| `txacli` | fast WinGet package search (`-s`), PC installed-app scanner (`scan`, `-i`), manifest converter, API builder, and PR submitter |
 | `txacreate` | submit installers to the repository as pull requests (`new`, `update`, `submit`, `hash`); GitHub access is requested only when the pull request is opened |
 | `txaci` | the 16-step package validator used by the repository bot |
 
