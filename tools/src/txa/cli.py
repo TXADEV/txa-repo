@@ -32,32 +32,27 @@ def _resolve_repo_root(out_arg: str | None) -> Path:
 
 
 def do_search(query: str) -> int:
-    from txa.core import i18n
-
-    print(f"\n{i18n.tr('Searching WinGet for', 'Đang tìm trên WinGet cho')} '{console.paint(query, 'cyan')}'...")
+    console.say(f"\nSearching WinGet for '{console.paint(query, 'cyan')}'...")
     results = wg.search_winget(query)
     if not results:
-        print(console.paint(i18n.tr("No packages found.", "Không tìm thấy gói nào."), "yellow"))
+        console.say(console.paint("No packages found.", "yellow"))
         return 1
-    print(f"\n{i18n.tr(f'Found {len(results)} package(s):', f'Tìm thấy {len(results)} gói:')}")
+    console.say(f"\nFound {len(results)} package(s):")
     print(f"  {'Id':<42} {'Version':<16} {'Name'}")
     print("  " + "-" * 78)
     for r in results:
         print(f"  {r['id']:<42} {r['version']:<16} {r['name']}")
-    print(f"\n{i18n.tr('To import a package, run:', 'Để import một gói vào kho, hãy chạy:')}\n  txacli {results[0]['id']}")
+    console.say(f"\nTo import a package, run:\n  txacli {results[0]['id']}")
     return 0
 
 
 def do_scan(repo_root: Path | None = None) -> list[dict[str, str]]:
-    from txa.core import i18n
-
-    print(f"\n{i18n.tr('Scanning installed programs on this PC not yet in TXA...', 'Đang quét các phần mềm trên máy chưa có trong TXA...')}")
+    console.say("\nScanning installed programs on this PC not yet in TXA...")
     untracked = wg.scan_installed_winget_packages(repo_root=repo_root)
     if not untracked:
-        print(console.paint(i18n.tr("[+] All detected WinGet programs on this machine are already in TXA!",
-                                    "[+] Tất cả phần mềm WinGet trên máy đều đã có trong kho TXA!"), "green"))
+        console.say(console.paint("[+] All detected WinGet programs on this machine are already in TXA!", "green"))
         return []
-    print(f"\n{i18n.tr(f'Found {len(untracked)} installed program(s) available on WinGet:', f'Tìm thấy {len(untracked)} phần mềm trên máy có sẵn trên WinGet:')}")
+    console.say(f"\nFound {len(untracked)} installed program(s) available on WinGet:")
     print(f"{'#':<4} {'Installed Name':<38} {'WinGet Id':<36} {'Version'}")
     print("-" * 92)
     for idx, item in enumerate(untracked, 1):
@@ -67,22 +62,15 @@ def do_scan(repo_root: Path | None = None) -> list[dict[str, str]]:
 
 def do_build_api(repo_root: Path, api_out: str) -> int:
     from txa.ci.api import build_api
-    from txa.core import i18n
 
     api_target = Path(api_out).expanduser()
     if not api_target.is_absolute():
         api_target = (repo_root / api_target).resolve()
-    print(f"\n{i18n.tr('Building txa.v1 REST API into', 'Đang tạo REST API txa.v1 vào')} '{api_target}'...")
+    console.say(f"\nBuilding txa.v1 REST API into '{api_target}'...")
     summary = build_api(repo_root, api_target)
-    print(console.paint(i18n.tr(
-        f"[+] API build complete: {summary['packages']} package(s) indexed.",
-        f"[+] Đã tạo xong API: {summary['packages']} gói được lập chỉ mục.",
-    ), "green"))
+    console.say(console.paint(f"[+] API build complete: {summary['packages']} package(s) indexed.", "green"))
     if summary["skipped"]:
-        print(console.paint(i18n.tr(
-            f"[!] Skipped {len(summary['skipped'])} invalid release(s).",
-            f"[!] Đã bỏ qua {len(summary['skipped'])} bản phát hành không hợp lệ.",
-        ), "yellow"))
+        console.say(console.paint(f"[!] Skipped {len(summary['skipped'])} invalid release(s).", "yellow"))
     return 0
 
 
@@ -110,15 +98,11 @@ def do_import(args) -> int:
         if getattr(args, "yes", False) or not sys.stdin.isatty():
             queries.extend(item["id"] for item in untracked)
         else:
-            from txa.core import i18n
-
-            options = [console.Option("all", i18n.tr("All programs", "Tất cả phần mềm"),
-                                      i18n.tr(f"import all {len(untracked)} program(s)", f"import toàn bộ {len(untracked)} phần mềm"))]
+            options = [console.Option("all", "All programs", f"import all {len(untracked)} program(s)")]
             for item in untracked:
                 options.append(console.Option(item["id"], item["name"][:24], f"{item['id']} ({item['version']})"))
             picked = console.choose(
-                i18n.tr("\nSelect program to import (use ↑/↓ or type number, Enter to confirm)",
-                        "\nChọn phần mềm cần import (dùng ↑/↓ hoặc nhập số, Enter để xác nhận)"),
+                "\nSelect program to import (use ↑/↓ or type number, Enter to confirm)",
                 "import", options, default=0,
             )
             if picked.value == "all":
@@ -129,25 +113,23 @@ def do_import(args) -> int:
     if not queries:
         return 1
 
-    from txa.core import i18n
-
     namespace = getattr(args, "namespace", None) or config.get("namespace") or "TXAVL"
     created_dirs: list[Path] = []
     for query in queries:
-        print(f"\n{i18n.tr('Resolving', 'Đang phân giải')} '{console.paint(query, 'cyan')}'...")
+        console.say(f"\nResolving '{console.paint(query, 'cyan')}'...")
         wg_id = wg.resolve_to_winget_id(query)
         if not wg_id:
-            print(console.paint(i18n.tr(f"[-] Could not resolve '{query}' on WinGet.", f"[-] Không tìm thấy '{query}' trên WinGet."), "red"))
+            console.say(console.paint(f"[-] Could not resolve '{query}' on WinGet.", "red"))
             continue
         data = wg.query_winget_package(wg_id)
         if not data:
-            print(console.paint(i18n.tr(f"[-] No supported HTTPS installer found for '{wg_id}'.", f"[-] Không tìm thấy bộ cài HTTPS hợp lệ cho '{wg_id}'."), "red"))
+            console.say(console.paint(f"[-] No supported HTTPS installer found for '{wg_id}'.", "red"))
             continue
 
         draft = wg.convert_winget_to_draft(data, namespace=namespace, override_id=getattr(args, "id", None))
         errors = wg.validate_draft(draft)
         if errors:
-            print(console.paint(i18n.tr(f"[-] Validation failed for {draft.package_id}:", f"[-] Kiểm tra thất bại cho {draft.package_id}:"), "red"))
+            console.say(console.paint(f"[-] Validation failed for {draft.package_id}:", "red"))
             for err in errors:
                 print(f"    - {err}")
             continue
@@ -157,10 +139,10 @@ def do_import(args) -> int:
             print(console.paint(f"[DRY-RUN] {wg_id} -> {draft.ref} ({dest_dir})", "yellow"))
         else:
             print(console.paint(f"[+] {wg_id} -> {draft.ref}", "green"))
-            print(f"    {i18n.tr('Location:', 'Thư mục: ')} {dest_dir}")
-            print(f"    {i18n.tr('Targets: ', 'Kiến trúc:')} {', '.join(t.arch + ' (' + t.engine + ')' for t in draft.targets)}")
+            console.say(f"    Location: {dest_dir}")
+            console.say(f"    Targets:  {', '.join(t.arch + ' (' + t.engine + ')' for t in draft.targets)}")
             if draft.alias:
-                print(f"    {i18n.tr('Alias:   ', 'Lệnh cài:')} txapm install {draft.alias}")
+                console.say(f"    Alias:    txapm install {draft.alias}")
             created_dirs.append(dest_dir)
 
     if getattr(args, "build_api", False) and created_dirs and not getattr(args, "dry_run", False):

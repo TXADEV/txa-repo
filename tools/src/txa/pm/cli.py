@@ -112,7 +112,7 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
         installer.check_os(build)
     current = winos.current()
     if current:
-        print(f"      {P('Windows', 'gray')} needs {build['platform']['min_build']}+, this PC runs {winos.fmt(current)}")
+        console.say(f"      {P('Windows', 'gray')} needs {build['platform']['min_build']}+, this PC runs {winos.fmt(current)}")
     previous = installer.installed().get(package_id)
     if previous and previous["version"] == version and not getattr(args, "force", False) and not download_only:
         console.say(f"✓ {package_id} {version} is already installed (use --force to reinstall)")
@@ -135,12 +135,7 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
         return _die(str(exc))
     signer = getattr(result, "verified_signer", None)
     if signer:
-        from txa.core import i18n
-        msg = i18n.tr(
-            f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P(f'Authenticode signed by {signer} (evergreen installer)', 'green')}",
-            f"Đã xác thực chữ ký số Authenticode {P(signer, 'green', 'bold')} ({P(digest[:16] + '…', 'gray')})",
-        )
-        console.stage(3, total, msg)
+        console.stage(3, total, f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P(f'Authenticode signed by {signer} (evergreen installer)', 'green')}")
     else:
         console.stage(3, total, f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P('matches the manifest', 'green')}")
     payload = result.path
@@ -149,6 +144,8 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
         return 0
 
     # [4] install
+    from txa.core import i18n
+
     extra: dict = {}
     if engine == "portable":
         console.stage(4, total, "Unpacking the portable archive and adding it to PATH")
@@ -157,7 +154,7 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
             extra = installer.install_portable(package_id, version, target, payload, bar)
         finally:
             console.done_line()
-        code, meaning = 0, "unpacked"
+        code, meaning = 0, i18n.translate("unpacked")
         scope = "user"
         payload.unlink(missing_ok=True)
         print(f"      {P('folder', 'gray')} {extra['dir']}")
@@ -174,10 +171,10 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
                                 f"{P(' - approve the UAC prompt', 'yellow') if needs_uac else ''}")
         with console.working("installing…" if mode != "interactive" else "waiting for the installer window…", "      ") as busy:
             code = installer.run(executable, params, elevate)
-        meaning = installer.EXIT_CODES.get(code, "see the installer log")
+        meaning = i18n.translate(installer.EXIT_CODES.get(code, "see the installer log"))
         if code not in set(target.get("success_codes") or []) | installer.SUCCESS:
             return _die(f"installer exited with {code}: {meaning} (log: {log})")
-        print(f"      {P('finished in ' + console.human_time(busy.elapsed), 'gray')} · exit code {code} ({meaning})")
+        console.say(f"      {P('finished in ' + console.human_time(busy.elapsed), 'gray')} · exit code {code} ({meaning})")
 
     # [5] record
     installer.record(package_id, version, target, code, about["name"], scope, src.name, extra)
@@ -185,7 +182,7 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
     console.say(f"✓ {P(about['name'], 'bold')} {P(version, 'green', 'bold')} installed in "
                 f"{console.human_time(time.monotonic() - started)} ({meaning})")
     if engine == "portable":
-        print(P("  Open a new terminal so the updated PATH is picked up.", "yellow"))
+        console.say(P("  Open a new terminal so the updated PATH is picked up.", "yellow"))
     return 0
 
 
@@ -513,19 +510,16 @@ def cmd_info() -> int:
     email = f" <{record['email']}>" if record.get("email") else ""
     enabled = [i["name"] for i in config.sources() if i.get("enabled", True)]
     cur_lang = config.lang()
-    lang_label = "vi (Tiếng Việt)" if cur_lang == "vi" else "en (English)"
+    lang_label = "vi (Vietnamese)" if cur_lang == "vi" else "en (English)"
     rows = [
         ("windows", f"{winos.fmt(current) if current else '-'} · {winos.native_arch()}"),
         ("language", lang_label),
-        ("sources", ", ".join(enabled) or i18n.tr("(none enabled)", "(chưa bật kho nào)")),
+        ("sources", ", ".join(enabled) or i18n.translate("(none enabled)")),
         ("repository", str(config.get("upstream"))),
         ("home", str(config.txa_home())),
         ("downloads", str(config.temp_root())),
         ("logs", str(config.txa_home() / "logs")),
-        ("installed", i18n.tr(
-            f"{len(installer.installed())} package(s), {len(installer.pins())} pin(s)",
-            f"{len(installer.installed())} gói đã cài, {len(installer.pins())} đang ghim",
-        )),
+        ("installed", i18n.translate(f"{len(installer.installed())} package(s), {len(installer.pins())} pin(s)")),
         ("github", f"{record.get('login', '-')}{email}"),
     ]
     print(f"{P('txapm', 'bold', 'cyan')} {P(__version__, 'green', 'bold')}")
@@ -602,7 +596,7 @@ def cmd_search(args) -> int:
         suggestions = sources.suggest(args.text)
         if suggestions:
             styled = ", ".join(P(s, "green", "bold") for s in suggestions)
-            console.say(f"  {P('→ Did you mean / Gợi ý gói:', 'cyan', 'bold')} {styled}")
+            console.say(f"  {P('→ Did you mean:', 'cyan', 'bold')} {styled}")
         if args.source:
             try:
                 other_hits = Sources(None).search(args.text)
@@ -756,27 +750,23 @@ def cmd_doctor(args) -> int:
     import subprocess
     from txa.core import credentials, i18n
 
-    vi = i18n.is_vi()
     print(f"{P('TXA Doctor', 'bold', 'cyan')} · txapm {P(__version__, 'green', 'bold')}\n")
     current = winos.current()
-    cur_lang = "Tiếng Việt (vi)" if vi else "English (en)"
-    print(f"  {P('✓', 'green')} Windows:     {winos.fmt(current) if current else 'unknown'} ({winos.native_arch()}) · admin={installer.is_admin()}")
-    print(f"  {P('✓', 'green')} {i18n.tr('Language:   ', 'Ngôn ngữ:   ')} {P(cur_lang, 'cyan')} ({i18n.tr('change with `txapm lang`', 'đổi bằng `txapm lang`')})")
+    cur_lang = "Vietnamese (vi)" if i18n.is_vi() else "English (en)"
+    console.say(f"  {P('✓', 'green')} Windows:     {winos.fmt(current) if current else 'unknown'} ({winos.native_arch()}) · admin={installer.is_admin()}")
+    console.say(f"  {P('✓', 'green')} Language:    {P(cur_lang, 'cyan')} (change with `txapm lang`)")
 
     # Sources check
     for src_cfg in config.sources():
         if not src_cfg.get("enabled", True):
-            print(f"  {P('-', 'gray')} {i18n.tr('Source', 'Kho nguồn')} '{src_cfg['name']}': {i18n.tr('disabled', 'đã tắt')} ({src_cfg['url']})")
+            console.say(f"  {P('-', 'gray')} Source '{src_cfg['name']}': disabled ({src_cfg['url']})")
             continue
         try:
             s = Sources(src_cfg["name"]).items[0]
             cnt = s.index().get("count", 0)
-            if vi:
-                print(f"  {P('✓', 'green')} Kho '{P(src_cfg['name'], 'magenta')}': trực tuyến · {P(str(cnt), 'bold')} gói ({src_cfg['url']})")
-            else:
-                print(f"  {P('✓', 'green')} Source '{P(src_cfg['name'], 'magenta')}': online · {P(str(cnt), 'bold')} package(s) ({src_cfg['url']})")
+            console.say(f"  {P('✓', 'green')} Source '{P(src_cfg['name'], 'magenta')}': online · {P(str(cnt), 'bold')} package(s) ({src_cfg['url']})")
         except Exception as exc:
-            print(f"  {P('✗', 'red')} {i18n.tr('Source', 'Kho')} '{src_cfg['name']}': {i18n.tr('error', 'lỗi')} ({exc})")
+            console.say(f"  {P('✗', 'red')} Source '{src_cfg['name']}': error ({exc})")
 
     # WinGet check
     try:
@@ -785,26 +775,22 @@ def cmd_doctor(args) -> int:
     except Exception:
         wg_ver = None
     if wg_ver:
-        print(f"  {P('✓', 'green')} WinGet CLI:  {wg_ver} ({i18n.tr('ready for `txacli` & `txapm winget`', 'sẵn sàng cho `txacli` & `txapm winget`')})")
+        console.say(f"  {P('✓', 'green')} WinGet CLI:  {wg_ver} (ready for `txacli` & `txapm winget`)")
     else:
-        print(f"  {P('!', 'yellow')} WinGet CLI:  {i18n.tr('not found in PATH', 'chưa có trong PATH')}")
+        console.say(f"  {P('!', 'yellow')} WinGet CLI:  not found in PATH")
 
     # GitHub credentials
     rec = credentials.stored()
     if rec and rec.get("login"):
-        print(f"  {P('✓', 'green')} GitHub Auth: {i18n.tr('signed in as', 'đã đăng nhập tài khoản')} {P(rec['login'], 'cyan')}")
+        console.say(f"  {P('✓', 'green')} GitHub Auth: signed in as {P(rec['login'], 'cyan')}")
     else:
-        print(f"  {P('-', 'gray')} GitHub Auth: {i18n.tr('not signed in (optional; run `txacreate token --store` for PRs)', 'chưa đăng nhập (tùy chọn; chạy `txacreate token --store` khi cần mở PR)')}")
+        console.say(f"  {P('-', 'gray')} GitHub Auth: not signed in (optional; run `txacreate token --store` for PRs)")
 
     # Installed & cache stats
     records = installer.installed()
     temp_bytes = sum(f.stat().st_size for f in config.temp_root().rglob("*") if f.is_file()) if config.temp_root().is_dir() else 0
-    if vi:
-        print(f"  {P('✓', 'green')} Đã cài đặt:  {len(records)} gói quản lý bởi txapm · {len(installer.pins())} gói đang ghim")
-        print(f"  {P('✓', 'green')} Bộ nhớ đệm:  {console.human_size(temp_bytes)} tại {config.temp_root()} (dọn bằng `txapm clean`)")
-    else:
-        print(f"  {P('✓', 'green')} Installed:   {len(records)} package(s) managed by txapm · {len(installer.pins())} pinned")
-        print(f"  {P('✓', 'green')} Cache size:  {console.human_size(temp_bytes)} in {config.temp_root()} (clean with `txapm clean`)")
+    console.say(f"  {P('✓', 'green')} Installed:   {len(records)} package(s) managed by txapm · {len(installer.pins())} pinned")
+    console.say(f"  {P('✓', 'green')} Cache size:  {console.human_size(temp_bytes)} in {config.temp_root()} (clean with `txapm clean`)")
     return 0
 
 
@@ -816,14 +802,12 @@ def cmd_lang(args) -> int:
         default_idx = 1 if config.lang() == "vi" else 0
         opts = [
             console.Option("en", "English", "Display all CLI messages in English"),
-            console.Option("vi", "Tiếng Việt", "Hiển thị mọi thông báo CLI bằng Tiếng Việt"),
+            console.Option("vi", "Vietnamese", "Translate all CLI messages into Vietnamese"),
         ]
-        picked = console.choose("Language / Ngôn ngữ (use ↑/↓ or 1-2, Enter to confirm)", "lang", opts, default=default_idx)
+        picked = console.choose("Language (use ↑/↓ or 1-2, Enter to confirm)", "lang", opts, default=default_idx)
         chosen = config.set_lang(str(picked.value))
-    if chosen == "vi":
-        print(f"{P('✓', 'green', 'bold')} Đã chuyển ngôn ngữ sang {P('Tiếng Việt (vi)', 'cyan', 'bold')}")
-    else:
-        print(f"{P('✓', 'green', 'bold')} Language set to {P('English (en)', 'cyan', 'bold')}")
+    target_label = "Vietnamese (vi)" if chosen == "vi" else "English (en)"
+    console.say(f"✓ Language set to {P(target_label, 'cyan', 'bold')}")
     return 0
 
 
@@ -1029,7 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("lang", aliases=["language"], help="view or switch display language (en / vi)")
-    p.add_argument("code", nargs="?", choices=["en", "vi"], help="en (English) or vi (Tiếng Việt)")
+    p.add_argument("code", nargs="?", choices=["en", "vi"], help="en (English) or vi (Vietnamese)")
     p.set_defaults(func=cmd_lang)
 
     args = parser.parse_args(argv)
@@ -1041,8 +1025,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except NotFound as exc:
-        from txa.core import i18n
-
         rc = _die(str(exc))
         pkg_arg = getattr(args, "package", None)
         if pkg_arg:
@@ -1050,8 +1032,7 @@ def main(argv: list[str] | None = None) -> int:
                 suggestions = Sources(getattr(args, "source", None)).suggest(pkg_arg)
                 if suggestions:
                     styled = ", ".join(P(s, "green", "bold") for s in suggestions)
-                    lbl = i18n.tr("→ Did you mean:", "→ Gợi ý gói:")
-                    console.say(f"  {P(lbl, 'cyan', 'bold')} {styled}")
+                    console.say(f"  {P('→ Did you mean:', 'cyan', 'bold')} {styled}")
             except Exception:
                 pass
         return rc

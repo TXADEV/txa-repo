@@ -95,11 +95,15 @@ def cell(text: str, width: int, *styles: str) -> str:
 
 
 def head(text: str) -> str:
-    return paint(text, "bold", "cyan")
+    from txa.core import i18n
+
+    return paint(i18n.translate(text), "bold", "cyan")
 
 
 def label(text: str, width: int = 11) -> str:
-    return paint(f"{text:<{width}}", "gray")
+    from txa.core import i18n
+
+    return paint(f"{i18n.translate(text):<{width}}", "gray")
 
 
 def status(name: str) -> str:
@@ -190,7 +194,9 @@ class working:
     _FRAMES = "-\\|/"
 
     def __init__(self, text: str, indent: str = "  "):
-        self.text = text
+        from txa.core import i18n
+
+        self.text = i18n.translate(text)
         self.indent = indent
         self.elapsed = 0.0
         self._stop = None
@@ -198,7 +204,9 @@ class working:
         self._started = 0.0
 
     def update(self, text: str) -> None:
-        self.text = text
+        from txa.core import i18n
+
+        self.text = i18n.translate(text)
 
     def __enter__(self) -> "working":
         import threading
@@ -312,19 +320,27 @@ def _read_line(prefix: str, placeholder: str) -> str:
 
 
 def _question_text(question: str, example: str, key: str) -> str:
-    example_part = f" |e.g. {example}|" if example else ""
-    return f"{question}{example_part} [{key}] value is:"
+    from txa.core import i18n
+
+    q = i18n.translate(question)
+    eg = i18n.translate("e.g.")
+    val_is = i18n.translate("value is:")
+    example_part = f" |{eg} {example}|" if example else ""
+    return f"{q}{example_part} [{key}] {val_is}"
 
 
 def field(question: str, example: str, key: str, default: str = "", validate=None) -> str:
     """Ask for one value. ``validate(value)`` returns an error text or None; a blank answer takes ``default``."""
+    from txa.core import i18n
+
     head = _question_text(question, example, key)
+    val_is = i18n.translate("value is:")
     while True:
         if _raw_available():
             wrap = len(head) + len(default) + 6 > _columns()
             if wrap:
                 print(head)
-            prefix = "    value is: " if wrap else head + " "
+            prefix = f"    {val_is} " if wrap else head + " "
             answer = _read_line(prefix, default).strip() or default
             sys.stdout.write("\r\x1b[K" + (prefix if wrap else head + " ") + paint(answer, "cyan", "bold") + "\n")
             sys.stdout.flush()
@@ -337,22 +353,25 @@ def field(question: str, example: str, key: str, default: str = "", validate=Non
         problem = validate(answer) if validate else (None if answer else "a value is required")
         if not problem:
             return answer
-        print(paint(f"  ✗ {problem}", "red"))
+        print(paint(f"  ✗ {i18n.translate(problem)}", "red"))
         default = answer if answer else default
 
 
 def choose(question: str, key: str, options: list[Option], default: int = 0) -> Option:
     """Pick one of ``options`` with Up/Down (or type its number), Enter to confirm."""
-    head = f"{question} [{key}] value is:"
+    from txa.core import i18n
+
+    head = f"{i18n.translate(question)} [{key}] {i18n.translate('value is:')}"
     count = len(options)
     default = min(max(default, 0), count - 1)
     if not _raw_available() or count + 2 > shutil_lines():
         print(head)
         for number, option in enumerate(options, 1):
-            print(f"  {number:>2}) {cell(option.label, 16, 'bold')} {paint(option.note, 'gray')}")
+            print(f"  {number:>2}) {cell(i18n.translate(option.label), 16, 'bold')} {paint(i18n.translate(option.note), 'gray')}")
         while True:
             try:
-                answer = input(f"Number 1-{count}, or press Enter for {options[default].label}: ").strip()
+                prompt_msg = i18n.translate(f"Number 1-{count}, or press Enter for {options[default].label}: ")
+                answer = input(prompt_msg).strip()
             except EOFError:
                 answer = ""
             if not answer:
@@ -362,7 +381,7 @@ def choose(question: str, key: str, options: list[Option], default: int = 0) -> 
             by_name = [o for o in options if o.label.lower() == answer.lower()]
             if by_name:
                 return by_name[0]
-            print(paint(f"  ✗ type a number from 1 to {count}", "red"))
+            print(paint(f"  ✗ {i18n.translate(f'type a number from 1 to {count}')}", "red"))
     index, typed = default, ""
     out = sys.stdout
 
@@ -373,8 +392,9 @@ def choose(question: str, key: str, options: list[Option], default: int = 0) -> 
             selected = position == index
             marker = paint("›", "cyan", "bold") if selected else " "
             num = paint(f"{position + 1:>2})", "cyan", "bold") if selected else paint(f"{position + 1:>2})", "gray")
-            label = cell(option.label, 24, "bold", "cyan") if selected else cell(option.label, 24)
-            out.write(f"\x1b[K  {marker} {num} {label} {paint(option.note, 'gray')}\n")
+            lbl_text = i18n.translate(option.label)
+            label = cell(lbl_text, 24, "bold", "cyan") if selected else cell(lbl_text, 24)
+            out.write(f"\x1b[K  {marker} {num} {label} {paint(i18n.translate(option.note), 'gray')}\n")
         out.flush()
 
     print(head)
@@ -394,7 +414,7 @@ def choose(question: str, key: str, options: list[Option], default: int = 0) -> 
             if 1 <= int(typed) <= count:
                 index = int(typed) - 1
         draw(False)
-    out.write(f"\x1b[{count + 1}A\x1b[J{head} {paint(options[index].label, 'cyan', 'bold')}\n")
+    out.write(f"\x1b[{count + 1}A\x1b[J{head} {paint(i18n.translate(options[index].label), 'cyan', 'bold')}\n")
     out.flush()
     return options[index]
 
@@ -407,9 +427,12 @@ def shutil_lines() -> int:
 
 def confirm(question: str, default: bool = False) -> bool:
     """A y/n question. Enter takes the default."""
+    from txa.core import i18n
+
+    q = i18n.translate(question)
     hint = "(Y/n)" if default else "(y/N)"
     if _raw_available():
-        sys.stdout.write(f"{question}: {paint(hint, 'gray')} ")
+        sys.stdout.write(f"{q}: {paint(hint, 'gray')} ")
         sys.stdout.flush()
         while True:
             key = _getkey()
@@ -419,12 +442,13 @@ def confirm(question: str, default: bool = False) -> bool:
             if isinstance(key, str) and key.lower() in ("y", "n"):
                 answer = key.lower() == "y"
                 break
-        sys.stdout.write("\r\x1b[K" + f"{question}: " + paint("Yes" if answer else "No", "cyan", "bold") + "\n")
+        ans_label = i18n.translate("Yes" if answer else "No")
+        sys.stdout.write("\r\x1b[K" + f"{q}: " + paint(ans_label, "cyan", "bold") + "\n")
         sys.stdout.flush()
         return answer
     while True:
         try:
-            text = input(f"{question}: {hint} ").strip().lower()
+            text = input(f"{q}: {hint} ").strip().lower()
         except EOFError:
             return default
         if not text:
@@ -436,9 +460,12 @@ def confirm(question: str, default: bool = False) -> bool:
 
 
 def ask(prompt: str, default: str | None = None) -> str:
+    from txa.core import i18n
+
+    p = i18n.translate(prompt)
     suffix = f" [{default}]" if default else ""
     try:
-        answer = input(f"  {paint(prompt, 'bold')}{suffix}: ").strip()
+        answer = input(f"  {paint(p, 'bold')}{suffix}: ").strip()
     except EOFError:
         answer = ""
     return answer or (default or "")
@@ -531,6 +558,27 @@ class SmartArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("parser_class", SmartArgumentParser)
         return super().add_subparsers(**kwargs)
 
+    def format_help(self) -> str:
+        from txa.core import i18n
+
+        if i18n.is_vi():
+            if self.description:
+                self.description = i18n.translate(self.description)
+            for action in self._actions:
+                if getattr(action, "help", None) and action.help != argparse.SUPPRESS:
+                    action.help = i18n.translate(action.help)
+                choices = getattr(action, "choices", None)
+                if isinstance(choices, dict):
+                    for subact in getattr(action, "_choices_actions", ()):
+                        if getattr(subact, "help", None):
+                            subact.help = i18n.translate(subact.help)
+        return i18n.translate(super().format_help())
+
+    def format_usage(self) -> str:
+        from txa.core import i18n
+
+        return i18n.translate(super().format_usage())
+
     def _all_flags_and_subcommands(self) -> tuple[list[str], list[str]]:
         flags: list[str] = []
         subcmds: list[str] = []
@@ -554,8 +602,8 @@ class SmartArgumentParser(argparse.ArgumentParser):
 
         self.print_usage(sys.stderr)
         hint_line = ""
-        lbl_cmd = i18n.tr("→ Did you mean:", "→ Gợi ý lệnh:")
-        lbl_flg = i18n.tr("→ Did you mean flag:", "→ Gợi ý tham số:")
+        lbl_cmd = i18n.translate("→ Did you mean:")
+        lbl_flg = i18n.translate("→ Did you mean flag:")
 
         m_choice = re.search(r"invalid choice:\s*'([^']+)'\s*\(choose from ([^)]+)\)", message)
         if m_choice:
@@ -582,6 +630,7 @@ class SmartArgumentParser(argparse.ArgumentParser):
                         styled = ", ".join(paint(f"{self.prog} {m}", "green", "bold", stream=sys.stderr) for m in matches)
                         hint_line = f"  {paint(lbl_cmd, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
 
-        err_prefix = paint(f"{self.prog}: error:", "red", "bold", stream=sys.stderr)
-        self.exit(2, f"{err_prefix} {message}\n{hint_line}")
+        err_word = i18n.translate("error")
+        err_prefix = paint(f"{self.prog}: {err_word}:", "red", "bold", stream=sys.stderr)
+        self.exit(2, f"{err_prefix} {i18n.translate(message)}\n{hint_line}")
 

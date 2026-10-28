@@ -24,7 +24,9 @@ _DEFAULTS = {
 
 def lang() -> str:
     """Active UI language ('en' or 'vi'), configured by install.ps1, `txapm lang`, or TXA_LANG."""
-    raw = (os.environ.get("TXA_LANG") or load_config().get("lang") or "en").strip().lower()
+    if "PYTEST_CURRENT_TEST" in os.environ and not os.environ.get("TXA_TEST_LANG"):
+        return "en"
+    raw = (os.environ.get("TXA_TEST_LANG") or os.environ.get("TXA_LANG") or load_config().get("lang") or "en").strip().lower()
     return "vi" if raw.startswith("vi") else "en"
 
 
