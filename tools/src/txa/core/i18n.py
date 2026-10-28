@@ -364,6 +364,12 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"    Alias:    "), "    Lệnh cài: "),
 
     # txacreate / txaci
+    (re.compile(r"For information about the restrictions for each field, visit (.+)"),
+     r"Để biết thông tin chi tiết về các quy định của từng trường, hãy truy cập \1"),
+    (re.compile(r"Press ENTER to submit the value for each question including accepting the \(default\) value\."),
+     r"Nhấn ENTER để xác nhận giá trị cho từng câu hỏi (nhận giá trị mặc định trong ngoặc)."),
+    (re.compile(r"Please enter values for the following fields:"),
+     r"Vui lòng nhập giá trị cho các trường thông tin sau:"),
     (re.compile(r"unpacked into the TXA apps folder, PATH gets: (.+)"),
      r"giải nén vào thư mục ứng dụng TXA, thêm vào PATH: \1"),
     (re.compile(r"\(the installer program itself is (.+?), that is normal\)"),

@@ -24,7 +24,7 @@ ARCHES = [
 
 
 def docs_url() -> str:
-    return "https://aka.ms/winget-manifest-schema"
+    return f"https://github.com/{config.get('upstream')}/tree/main/tools/src/txa/schemas"
 
 
 def intro() -> None:
