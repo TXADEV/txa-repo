@@ -296,6 +296,9 @@ Write-Table @(
     @('txapm export pkgs.json', 'save the installed list', 'l\u01b0u danh s\u00e1ch \u0111\u00e3 c\u00e0i'),
     @('txapm import pkgs.json', 'reinstall everything on a new PC', 'c\u00e0i l\u1ea1i t\u1ea5t c\u1ea3 tr\u00ean m\u00e1y m\u1edbi'),
     @('txapm download <id> -d D:\setup', 'installer + manifest into a folder', 't\u1ea3i b\u1ed9 c\u00e0i v\u00e0 manifest v\u00e0o m\u1ed9t th\u01b0 m\u1ee5c'),
+    @('txapm doctor', 'check system health, sources, WinGet & cache', 'ki\u1ec3m tra s\u1ee9c kho\u1ebb h\u1ec7 th\u1ed1ng, kho ngu\u1ed3n, WinGet v\u00e0 cache'),
+    @('txapm clean [--all]', 'clean temporary installer cache & logs', 'd\u1ecdn d\u1eb9p b\u1ed9 c\u00e0i t\u1ea3i t\u1ea1m v\u00e0 file log'),
+    @('txapm wg install <id>', 'install package from WinGet via txapm', 'c\u00e0i g\u00f3i t\u1eeb WinGet th\u00f4ng qua txapm'),
     @('txapm --info', 'version, paths, sources, account', 'phi\u00ean b\u1ea3n, \u0111\u01b0\u1eddng d\u1eabn, kho ngu\u1ed3n, t\u00e0i kho\u1ea3n')
 )
 
@@ -317,7 +320,8 @@ Write-Table @(
     @('txacreate new <url> --check', 'also run all 14 bot checks locally (slower)', 'ch\u1ea1y lu\u00f4n 14 b\u01b0\u1edbc ki\u1ec3m tra c\u1ee7a bot tr\u00ean m\u00e1y (ch\u1eadm h\u01a1n)'),
     @('txacreate hash setup.exe', 'SHA-256, engine and architecture', 'SHA-256, lo\u1ea1i b\u1ed9 c\u00e0i v\u00e0 ki\u1ebfn tr\u00fac'),
     @('txacreate validate <folder>', 'run the bot checks locally', 'ch\u1ea1y c\u00e1c b\u01b0\u1edbc ki\u1ec3m tra c\u1ee7a bot tr\u00ean m\u00e1y'),
-    @('txacreate token [--store|--clear]', 'optional: show, pre-authorize or forget GitHub login', 'tu\u1ef3 ch\u1ecdn: xem, c\u1ea5p tr\u01b0\u1edbc ho\u1eb7c qu\u00ean \u0111\u0103ng nh\u1eadp GitHub')
+    @('txacreate token [--store|--clear]', 'optional: show, pre-authorize or forget GitHub login', 'tu\u1ef3 ch\u1ecdn: xem, c\u1ea5p tr\u01b0\u1edbc ho\u1eb7c qu\u00ean \u0111\u0103ng nh\u1eadp GitHub'),
+    @('txacli -s <query> | txacli -i', 'search WinGet or import installed PC apps into TXA', 't\u00ecm tr\u00ean WinGet ho\u1eb7c qu\u00e9t m\u00e1y \u0111\u1ec3 t\u1ea1o g\u00f3i TXA t\u1ef1 \u0111\u1ed9ng')
 )
 Write-Host (T 'noLogin') -ForegroundColor DarkGray
 
