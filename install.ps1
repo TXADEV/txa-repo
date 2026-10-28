@@ -80,12 +80,13 @@ $Strings = @{
         newTerminal = '  OPEN A NEW TERMINAL FIRST so the new PATH is loaded, then try:'
         hPm = 'txapm - install and manage software'
         hSrc = 'txapm source - extra package repositories'
+        hCli = 'txacli - fast WinGet importer, PC scanner & API builder'
         hCreate = 'txacreate - publish software to the TXA repository'
         hEx = 'Examples'
         noLogin = '  (no login needed up front: GitHub access is asked only at the fork step)'
         portable = '(portable: unpacked + added to your PATH, no admin needed)'
         npmNote = '(npm ships with Node.js)'
-        help = '  Help for any command:  txapm <command> --help      Docs: https://github.com/{0}'
+        help = '  Help for any command:  txapm <command> --help | txacli --help | txacreate --help      Docs: https://github.com/{0}'
         pickTitle = 'Language'
     }
     vi = @{
@@ -110,12 +111,13 @@ $Strings = @{
         newTerminal = '  H\u00c3Y M\u1ede TERMINAL M\u1edaI \u0111\u1ec3 n\u1ea1p PATH m\u1edbi, r\u1ed3i th\u1eed:'
         hPm = 'txapm - c\u00e0i v\u00e0 qu\u1ea3n l\u00fd ph\u1ea7n m\u1ec1m'
         hSrc = 'txapm source - th\u00eam kho ph\u1ea7n m\u1ec1m kh\u00e1c'
+        hCli = 'txacli - c\u00f4ng c\u1ee5 nhanh: t\u00ecm/import WinGet, qu\u00e9t m\u00e1y v\u00e0 t\u1ea1o API'
         hCreate = 'txacreate - \u0111\u00f3ng g\u00f3p ph\u1ea7n m\u1ec1m v\u00e0o kho TXA'
         hEx = 'V\u00ed d\u1ee5'
         noLogin = '  (kh\u00f4ng c\u1ea7n \u0111\u0103ng nh\u1eadp tr\u01b0\u1edbc: ch\u1ec9 xin quy\u1ec1n GitHub \u1edf b\u01b0\u1edbc fork)'
         portable = '(b\u1ea3n portable: gi\u1ea3i n\u00e9n v\u00e0 th\u00eam v\u00e0o PATH, kh\u00f4ng c\u1ea7n quy\u1ec1n admin)'
         npmNote = '(npm \u0111i k\u00e8m Node.js)'
-        help = '  Tr\u1ee3 gi\u00fap m\u1ecdi l\u1ec7nh:  txapm <command> --help      T\u00e0i li\u1ec7u: https://github.com/{0}'
+        help = '  Tr\u1ee3 gi\u00fap m\u1ecdi l\u1ec7nh:  txapm <command> --help | txacli --help | txacreate --help      T\u00e0i li\u1ec7u: https://github.com/{0}'
         pickTitle = 'Ng\u00f4n ng\u1eef'
     }
 }
@@ -355,9 +357,14 @@ Write-Table @(
     @('txapm export pkgs.json', 'save the installed list', 'l\u01b0u danh s\u00e1ch \u0111\u00e3 c\u00e0i'),
     @('txapm import pkgs.json', 'reinstall everything on a new PC', 'c\u00e0i l\u1ea1i t\u1ea5t c\u1ea3 tr\u00ean m\u00e1y m\u1edbi'),
     @('txapm download <id> -d D:\setup', 'installer + manifest into a folder', 't\u1ea3i b\u1ed9 c\u00e0i v\u00e0 manifest v\u00e0o m\u1ed9t th\u01b0 m\u1ee5c'),
-    @('txapm doctor', 'check system health, sources, WinGet & cache', 'ki\u1ec3m tra s\u1ee9c kho\u1ebb h\u1ec7 th\u1ed1ng, kho ngu\u1ed3n, WinGet v\u00e0 cache'),
+    @('txapm which <id>', 'show local install record, scope & paths', 'xem \u0111\u01b0\u1eddng d\u1eabn, ph\u1ea1m vi v\u00e0 th\u00f4ng tin g\u00f3i \u0111\u00e3 c\u00e0i'),
+    @('txapm log [<id>] [-n 50]', 'list or view latest installer logs', 'li\u1ec7t k\u00ea ho\u1eb7c xem n\u1ed9i dung file log c\u00e0i \u0111\u1eb7t'),
     @('txapm clean [--all]', 'clean temporary installer cache & logs', 'd\u1ecdn d\u1eb9p b\u1ed9 c\u00e0i t\u1ea3i t\u1ea1m v\u00e0 file log'),
+    @('txapm doctor', 'check system health, sources, WinGet & cache', 'ki\u1ec3m tra s\u1ee9c kho\u1ebb h\u1ec7 th\u1ed1ng, kho ngu\u1ed3n, WinGet v\u00e0 cache'),
+    @('txapm lang [en|vi]', 'view or switch display language (en / vi)', 'xem ho\u1eb7c chuy\u1ec3n \u0111\u1ed5i ng\u00f4n ng\u1eef hi\u1ec3n th\u1ecb (en / vi)'),
+    @('txapm wg search <query>', 'search packages directly on WinGet', 't\u00ecm ki\u1ebfm ph\u1ea7n m\u1ec1m tr\u1ef1c ti\u1ebfp tr\u00ean WinGet'),
     @('txapm wg install <id>', 'install package from WinGet via txapm', 'c\u00e0i g\u00f3i t\u1eeb WinGet th\u00f4ng qua txapm'),
+    @('txapm wg -i', 'scan PC & import missing apps from WinGet', 'qu\u00e9t m\u00e1y v\u00e0 import c\u00e1c g\u00f3i ch\u01b0a c\u00f3 t\u1eeb WinGet'),
     @('txapm --info', 'version, paths, sources, account', 'phi\u00ean b\u1ea3n, \u0111\u01b0\u1eddng d\u1eabn, kho ngu\u1ed3n, t\u00e0i kho\u1ea3n')
 )
 
@@ -371,16 +378,28 @@ Write-Table @(
     @('txapm source disable|enable|remove <name>', 'switch off, on, or delete a source', 't\u1eaft, b\u1eadt ho\u1eb7c xo\u00e1 m\u1ed9t kho ngu\u1ed3n')
 )
 
+Write-Heading (T 'hCli')
+Write-Table @(
+    @('txacli -s <query>  (or: txacli search <q>)', 'search WinGet for matching packages', 't\u00ecm ki\u1ebfm g\u00f3i ph\u1ea7n m\u1ec1m tr\u00ean WinGet'),
+    @('txacli <winget-id-or-name>', 'convert WinGet package into TXA manifests', 'chuy\u1ec3n g\u00f3i WinGet sang b\u1ed9 th\u1ebb manifest TXA'),
+    @('txacli scan', 'list installed PC apps available on WinGet', 'li\u1ec7t k\u00ea ph\u1ea7n m\u1ec1m tr\u00ean m\u00e1y c\u00f3 s\u1eb5n tr\u00ean WinGet'),
+    @('txacli -i [-y]', 'scan PC & import missing apps into TXA', 'qu\u00e9t m\u00e1y v\u00e0 import t\u1ef1 \u0111\u1ed9ng v\u00e0o kho TXA'),
+    @('txacli build-api [-r <repo>] [-o <dir>]', 'build static txa.v1 REST API from manifests/', 't\u1ea1o t\u0129nh REST API txa.v1 t\u1eeb th\u01b0 m\u1ee5c manifests/'),
+    @('txacli submit <folder|repo|api>', 'open PR(s) for manifest folder, repo, or API', 'm\u1edf Pull Request cho th\u01b0 m\u1ee5c g\u00f3i, kho ho\u1eb7c API')
+)
+
 Write-Heading (T 'hCreate')
 Write-Table @(
     @('txacreate new <https-installer-url>', 'analyse + validate, then fork and open a PR', 'ph\u00e2n t\u00edch, ki\u1ec3m tra r\u1ed3i fork v\u00e0 m\u1edf Pull Request'),
+    @('txacreate new "GitHub CLI"', 'auto-create release from app name or WinGet ID', 't\u1ef1 \u0111\u1ed9ng t\u1ea1o g\u00f3i t\u1eeb t\u00ean ph\u1ea7n m\u1ec1m ho\u1eb7c WinGet ID'),
+    @('txacreate new -i', 'scan installed PC apps & create missing packages', 'qu\u00e9t ph\u1ea7n m\u1ec1m tr\u00ean m\u00e1y v\u00e0 t\u1ea1o g\u00f3i c\u00f2n thi\u1ebfu'),
     @('txacreate update TXAVL.HelloTool <url>', 'new version of an existing package', 'phi\u00ean b\u1ea3n m\u1edbi c\u1ee7a g\u00f3i \u0111\u00e3 c\u00f3'),
+    @('txacreate submit <folder|repo|api>', 'open PR for release folder, repo root, or API', 'm\u1edf Pull Request cho th\u01b0 m\u1ee5c g\u00f3i, kho ho\u1eb7c API'),
     @('txacreate new <url> --dry-run', 'preview the YAML only, send nothing', 'ch\u1ec9 xem tr\u01b0\u1edbc YAML, kh\u00f4ng g\u1eedi g\u00ec'),
     @('txacreate new <url> --check', 'also run all 14 bot checks locally (slower)', 'ch\u1ea1y lu\u00f4n 14 b\u01b0\u1edbc ki\u1ec3m tra c\u1ee7a bot tr\u00ean m\u00e1y (ch\u1eadm h\u01a1n)'),
     @('txacreate hash setup.exe', 'SHA-256, engine and architecture', 'SHA-256, lo\u1ea1i b\u1ed9 c\u00e0i v\u00e0 ki\u1ebfn tr\u00fac'),
-    @('txacreate validate <folder>', 'run the bot checks locally', 'ch\u1ea1y c\u00e1c b\u01b0\u1edbc ki\u1ec3m tra c\u1ee7a bot tr\u00ean m\u00e1y'),
-    @('txacreate token [--store|--clear]', 'optional: show, pre-authorize or forget GitHub login', 'tu\u1ef3 ch\u1ecdn: xem, c\u1ea5p tr\u01b0\u1edbc ho\u1eb7c qu\u00ean \u0111\u0103ng nh\u1eadp GitHub'),
-    @('txacli -s <query> | txacli -i', 'search WinGet or import installed PC apps into TXA', 't\u00ecm tr\u00ean WinGet ho\u1eb7c qu\u00e9t m\u00e1y \u0111\u1ec3 t\u1ea1o g\u00f3i TXA t\u1ef1 \u0111\u1ed9ng')
+    @('txacreate validate <folder|repo>', 'run the bot checks locally', 'ch\u1ea1y c\u00e1c b\u01b0\u1edbc ki\u1ec3m tra c\u1ee7a bot tr\u00ean m\u00e1y'),
+    @('txacreate token [--store|--clear]', 'optional: show, pre-authorize or forget GitHub login', 'tu\u1ef3 ch\u1ecdn: xem, c\u1ea5p tr\u01b0\u1edbc ho\u1eb7c qu\u00ean \u0111\u0103ng nh\u1eadp GitHub')
 )
 Write-Host (T 'noLogin') -ForegroundColor DarkGray
 

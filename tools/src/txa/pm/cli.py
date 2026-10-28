@@ -1,11 +1,15 @@
 """txapm - install and manage packages from the TXA repository.
 
-    txapm install <id|alias> [--version X.Y.Z] [--arch x64] [--progress|--interactive]
+    txapm install <id|alias> [--version X.Y.Z] [--arch x64] [--progress|--interactive] [--ignore-checksum]
     txapm upgrade [<id>] [--all]       txapm uninstall <id>
     txapm list [--upgrade-available]   txapm show <id>      txapm search <text>
     txapm export <file>                txapm import <file>
     txapm pin add|remove|list [<id>]   txapm download <id> [-d dir]
     txapm list --all                   txapm source list|add|remove|enable|disable|update|reset
+    txapm winget|wg <search|install|import|scan> [...]
+    txapm doctor                       txapm clean [--all|--logs]
+    txapm log [<id>] [-n 50]           txapm which <id>
+    txapm lang [en|vi]                 txapm help [<command>]
     txapm --info                       txapm hash <file|url>     txapm validate <folder>
 """
 from __future__ import annotations
@@ -890,8 +894,28 @@ def _install_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = console.SmartArgumentParser(prog="txapm", description="TXA package manager",
-        epilog='examples:\n  txapm search notepad\n  txapm install TXAVL.HelloTool\n  txapm upgrade --all\n  txapm uninstall TXAVL.HelloTool', formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = console.SmartArgumentParser(
+        prog="txapm",
+        description="TXA package manager",
+        epilog=(
+            "examples:\n"
+            "  txapm search chrome                  # search packages in TXA index\n"
+            "  txapm install chrome                 # install by ID or short alias\n"
+            "  txapm install chrome --ignore-checksum\n"
+            "  txapm list --all                     # list all PC programs matched to TXA\n"
+            "  txapm upgrade --all                  # upgrade all outdated packages\n"
+            "  txapm uninstall TXAVL.Chrome         # silent uninstall\n"
+            "  txapm wg search PowerToys            # search directly on WinGet\n"
+            "  txapm wg install Microsoft.PowerToys # convert & install from WinGet\n"
+            "  txapm wg -i                          # scan PC & import missing apps from WinGet\n"
+            "  txapm doctor                         # check system, sources, WinGet & cache\n"
+            "  txapm clean --all                    # clean temporary downloads & logs\n"
+            "  txapm log chrome                     # view latest installer log\n"
+            "  txapm which chrome                   # show install record, scope & paths\n"
+            "  txapm lang vi                        # switch CLI language (en / vi)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"txapm {__version__}")
     parser.add_argument("--info", action="store_true", help="show version, paths, source and account")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
@@ -1015,6 +1039,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("lang", aliases=["language"], help="view or switch display language (en / vi)")
     p.add_argument("code", nargs="?", choices=["en", "vi"], help="en (English) or vi (Vietnamese)")
     p.set_defaults(func=cmd_lang)
+
+    p = sub.add_parser("help", help="show help for txapm or a specific command")
+    p.add_argument("topic", nargs="?", help="command name")
 
     args = parser.parse_args(argv)
     if args.info:

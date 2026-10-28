@@ -196,13 +196,22 @@ def main(argv: list[str] | None = None) -> int:
         prog="txacli",
         description="TXA Fast CLI: WinGet importer, scanner, API builder, and PR submitter.",
         epilog=(
+            "commands:\n"
+            "  txacli search <query>              search WinGet packages (or: txacli -s <query>)\n"
+            "  txacli [import] <pkg> [<pkg2>...]  convert WinGet package(s) into TXA manifests\n"
+            "  txacli scan                        scan installed PC apps available on WinGet\n"
+            "  txacli -i [-y]                     scan PC & import missing apps into TXA\n"
+            "  txacli build-api [-r DIR] [-o DIR] build static txa.v1 REST API from manifests/\n"
+            "  txacli validate <folder|repo>      run 14-step validation on manifest(s) or repo\n"
+            "  txacli submit <folder|repo|api>    open PR(s) for manifest folder, repo, or API\n"
+            "  txacli help                        show this help message\n\n"
             "examples:\n"
             "  txacli -s PowerToys\n"
             "  txacli search \"GitHub CLI\"\n"
             "  txacli Microsoft.PowerToys GitHub.cli\n"
             "  txacli -i -y\n"
             "  txacli scan\n"
-            "  txacli Postman.Postman -o C:\\my-txa-repo --build-api --api-out C:\\my-txa-api\n"
+            "  txacli Postman.Postman -o C:\\my-txa-repo --build-api --api-out C:\\my-txa-api --add-source myrepo\n"
             "  txacli submit C:\\my-txa-repo\n"
             "  txacli validate C:\\my-txa-repo --offline"
         ),

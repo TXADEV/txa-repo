@@ -59,7 +59,7 @@ def config_path() -> Path:
 
 def load_config() -> dict:
     try:
-        return json.loads(config_path().read_text("utf-8"))
+        return json.loads(config_path().read_text("utf-8-sig"))
     except (OSError, ValueError):
         return {}
 

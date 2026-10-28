@@ -558,6 +558,19 @@ class SmartArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("parser_class", SmartArgumentParser)
         return super().add_subparsers(**kwargs)
 
+    def parse_args(self, args=None, namespace=None):
+        raw = list(sys.argv[1:] if args is None else args)
+        if raw and raw[0].lower() == "help":
+            if len(raw) >= 2:
+                for action in self._actions:
+                    choices = getattr(action, "choices", None)
+                    if isinstance(choices, dict) and raw[1] in choices:
+                        choices[raw[1]].print_help()
+                        self.exit(0)
+            self.print_help()
+            self.exit(0)
+        return super().parse_args(args, namespace)
+
     def format_help(self) -> str:
         from txa.core import i18n
 

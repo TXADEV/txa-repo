@@ -842,8 +842,23 @@ def _release_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = console.SmartArgumentParser(prog="txacreate", description="Publish installers to the TXA repository",
-        epilog='examples:\n  txacreate new https://vendor.example/app-1.2.3-x64.exe\n  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n  txacreate hash setup.exe', formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = console.SmartArgumentParser(
+        prog="txacreate",
+        description="Publish installers to the TXA repository",
+        epilog=(
+            "examples:\n"
+            "  txacreate new https://vendor.example/app-1.2.3-x64.exe\n"
+            "  txacreate new \"GitHub CLI\" --dry-run\n"
+            "  txacreate new Microsoft.PowerToys --dry-run\n"
+            "  txacreate new -i --dry-run\n"
+            "  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n"
+            "  txacreate submit C:\\my-txa-repo --dry-run\n"
+            "  txacreate validate C:\\my-txa-repo --offline\n"
+            "  txacreate hash setup.exe\n"
+            "  txacreate config set lang vi"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"txacreate {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -897,6 +912,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("paths", nargs="+")
     p.add_argument("--offline", action="store_true")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("help", help="show help for txacreate or a specific command")
+    p.add_argument("topic", nargs="?", help="command name")
 
     args = parser.parse_args(argv)
     if args.command is None:
