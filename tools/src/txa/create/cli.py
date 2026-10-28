@@ -708,54 +708,77 @@ def cmd_hash(args) -> int:
 
 
 def cmd_submit(args) -> int:
-    """Open a PR for a hand-written release folder (core + build + about cards)."""
-    from txa.core.manifest import Bundle, kind_of, release_dir
+    """Open a PR for a hand-written release folder, repo root, or built API folder."""
+    from txa.core.manifest import Bundle, discover_releases, kind_of, release_dir
     from txa.create.submit import find_open_pr, submit
 
-    folder = Path(args.folder)
-    bundle = Bundle.read(folder)
-    if not bundle.package_id or not bundle.version:
-        return _die(f"{folder}: no readable core.txa.yaml")
-    package_id, version = bundle.package_id, bundle.version
-    if not args.no_validate:
-        ctx = init_local([folder], offline=args.offline)
-        if args.check:
-            console.stage(1, 2, f"Validating {console.paint(package_id, 'bold')} {version} with the 14 bot checks")
-            report = run_live(ctx)
-        else:
-            ctx.data["offline"] = True
-            console.stage(1, 2, f"Quick check of {console.paint(package_id, 'bold')} {version} (the bot runs all 14 steps on the PR)")
-            report = quick_check(ctx)
-        if report["verdict"] == "fail" and not args.force:
-            return _die("validation failed - fix the issues above or pass --force")
-    console.stage(2 if not args.no_validate else 1, 2 if not args.no_validate else 1,
-                  "Forking the repository and opening the pull request")
-    try:
-        gh, login = _sign_in(args.token)
-    except GitHubError as exc:
-        return _die(f"{exc}\n  (or pass --token <PAT> / set TXA_TOKEN)")
-    upstream = config.get("upstream")
-    if not args.force:
-        existing = find_open_pr(gh, upstream, package_id, version)
-        if existing:
-            return _die(f"an open pull request already covers {package_id} {version}: {existing}")
-    try:
-        from txa.pm.source import Source
+    raw_folder = Path(args.folder)
+    releases = discover_releases(raw_folder)
+    if not releases:
+        return _die(f"{raw_folder}: no readable core.txa.yaml")
+    if len(releases) > 1 or releases[0].resolve() != raw_folder.resolve():
+        console.say(f"→ found {len(releases)} release(s) under {console.paint(str(raw_folder), 'cyan')}: "
+                    + ", ".join(f"{Bundle.read(r).package_id}@{Bundle.read(r).version}" for r in releases))
 
-        published = Source().versions(package_id)
-    except Exception:
-        published = []
-    kind = "New version" if published else "New package"
-    target_dir = release_dir(package_id, version)
-    files = {f"{target_dir}/{name}": raw.decode("utf-8") for name, raw in bundle.files.items() if kind_of(name)}
-    body = "\n".join([f"## 📖 Description", "", f"{kind}: `{package_id}` {version} - submitted from a local folder with "
-                      f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).", "",
-                      *_checklist(upstream), "", "---", f"<sub>Submitted with txacreate {__version__}</sub>"])
-    result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
-                    direct=args.direct)
-    console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
-    _open_pull_request(result.url, args)
-    return 0
+    gh, login = None, ""
+    upstream = config.get("upstream")
+    failures = 0
+
+    for idx, folder in enumerate(releases, 1):
+        bundle = Bundle.read(folder)
+        if not bundle.package_id or not bundle.version:
+            console.say(f"✗ {folder}: no readable core.txa.yaml")
+            failures += 1
+            continue
+        package_id, version = bundle.package_id, bundle.version
+        if len(releases) > 1:
+            print(f"\n{console.paint(f'── [{idx}/{len(releases)}] {package_id} {version}', 'bold', 'magenta')}")
+        if not args.no_validate:
+            ctx = init_local([folder], offline=args.offline)
+            if args.check:
+                console.stage(1, 2, f"Validating {console.paint(package_id, 'bold')} {version} with the 14 bot checks")
+                report = run_live(ctx)
+            else:
+                ctx.data["offline"] = True
+                console.stage(1, 2, f"Quick check of {console.paint(package_id, 'bold')} {version} (the bot runs all 14 steps on the PR)")
+                report = quick_check(ctx)
+            if report["verdict"] == "fail" and not args.force:
+                _die(f"{package_id} {version}: validation failed - fix the issues above or pass --force")
+                failures += 1
+                continue
+        if getattr(args, "dry_run", False):
+            console.say(f"✓ {package_id} {version} validated (--dry-run: skipped opening pull request)")
+            continue
+        console.stage(2 if not args.no_validate else 1, 2 if not args.no_validate else 1,
+                      "Forking the repository and opening the pull request")
+        if gh is None:
+            try:
+                gh, login = _sign_in(args.token)
+            except GitHubError as exc:
+                return _die(f"{exc}\n  (or pass --token <PAT> / set TXA_TOKEN)")
+        if not args.force:
+            existing = find_open_pr(gh, upstream, package_id, version)
+            if existing:
+                console.say(f"! an open pull request already covers {package_id} {version}: {existing}")
+                continue
+        try:
+            from txa.pm.source import Source
+
+            published = Source().versions(package_id)
+        except Exception:
+            published = []
+        kind = "New version" if published else "New package"
+        target_dir = release_dir(package_id, version)
+        files = {f"{target_dir}/{name}": raw.decode("utf-8") for name, raw in bundle.files.items() if kind_of(name)}
+        body = "\n".join([f"## 📖 Description", "", f"{kind}: `{package_id}` {version} - submitted from a local folder with "
+                          f"`txacreate submit` ({len(files)} card(s) in `{target_dir}/`).", "",
+                          *_checklist(upstream), "", "---", f"<sub>Submitted with txacreate {__version__}</sub>"])
+        result = submit(gh, upstream, login, package_id, version, files, f"{kind}: {package_id} {version}", body,
+                        direct=args.direct)
+        console.say(f"\n✓ pull request #{result.number} opened: {console.paint(result.url, 'cyan', 'bold')}")
+        if idx == 1:
+            _open_pull_request(result.url, args)
+    return 1 if failures else 0
 
 
 def cmd_show(args) -> int:
@@ -850,8 +873,9 @@ def main(argv: list[str] | None = None) -> int:
     _release_options(p)
     p.set_defaults(func=cmd_update)
 
-    p = sub.add_parser("submit", help="open a pull request for a hand-written release folder")
-    p.add_argument("folder", help="folder containing core.txa.yaml, build.txa.yaml, about.<lang>.txa.yaml")
+    p = sub.add_parser("submit", help="open a pull request for a release folder, repo root, or built API folder")
+    p.add_argument("folder", help="folder containing core.txa.yaml, manifests/, or built txa.v1 API")
+    p.add_argument("--dry-run", action="store_true", help="validate only without opening a pull request")
     p.add_argument("--offline", action="store_true", help="skip network checks in the validation")
     p.add_argument("--no-validate", action="store_true")
     p.add_argument("--check", action="store_true", help="run all 14 bot checks locally instead of the quick check")

@@ -1,78 +1,98 @@
-# Import & Tự Động Tạo Package từ WinGet / Máy Cá Nhân (`txacreate` & `winget-import`)
+# Công cụ `txacli` & Các Lệnh Mở Rộng `txapm` / `txacreate`
 
-Công cụ [`scripts/winget-import.ps1`](../scripts/winget-import.ps1) và lệnh `txacreate new` đã được tích hợp trực tiếp cầu nối WinGet, cho phép lấy bất kỳ phần mềm nào từ `txapm list --all` hoặc tên phần mềm bất kỳ để tự động tạo manifest chuẩn TXA mà không cần đi tìm link tải thủ công.
-
----
-
-## 1. Tự động thêm toàn bộ phần mềm đang cài trên máy (`--from-installed`)
-
-Quét toàn bộ phần mềm trên máy (tương tự `txapm list --all`), lọc ra các phần mềm chưa có trong kho TXA và tự động tạo manifest:
-
-```powershell
-# Quét và tự động import tất cả phần mềm trên máy vào kho manifests/
-.\scripts\winget-import.ps1 --from-installed -y
-
-# Hoặc chạy ở chế độ chọn từng số (1,3,5 hoặc all):
-.\scripts\winget-import.ps1 -i
-```
-
-Nếu muốn chạy qua luồng `txacreate new` đầy đủ (tự động tải file `.exe`/`.msi` thật về máy, kiểm tra SHA-256 & PE header):
-
-```powershell
-txacreate new --from-installed --dry-run
-```
+Toàn bộ công cụ [`scripts/winget-import.ps1`](../scripts/winget-import.ps1) và [`scripts/winget-import.py`](../scripts/winget-import.py) đã được nâng cấp thành lệnh CLI toàn cục **`txacli`** (và tích hợp trực tiếp vào **`txapm`** và **`txacreate`**), có thể chạy nhanh ở bất kỳ thư mục nào mà không cần gọi script PowerShell.
 
 ---
 
-## 2. Truyền thẳng Tên App bất kỳ từ `txapm list --all` vào `txacreate new`
+## 1. Lệnh `txacli` (Thay thế hoàn toàn `winget-import.ps1`)
 
-Không cần tìm URL tải `.exe`/`.msi`, chỉ cần gõ tên hiển thị hoặc WinGet ID vào `txacreate new`:
-
+### Tìm kiếm phần mềm trên WinGet
 ```powershell
-# Truyền tên phần mềm bất kỳ (hoặc nhiều phần mềm cùng lúc)
-txacreate new "GitHub CLI" "Unity Hub" "Steam" --dry-run --out .
-
-# Hoặc dùng script winget-import cực nhanh (không cần tải toàn bộ bộ cài nặng về máy)
-.\scripts\winget-import.ps1 "GitHub CLI" "GitHub Desktop" "Steam" "Sunshine" "Unity Hub"
+txacli -s "PowerToys"
+txacli -s "Microsoft.PowerToys"
+# Hoặc dùng subcommand:
+txacli search "GitHub CLI"
 ```
 
----
-
-## 3. Tìm kiếm package trên WinGet
-
+### Quét & Tự động Import phần mềm đang cài trên máy (`-i` / `scan`)
 ```powershell
-.\scripts\winget-import.ps1 -s "chrome"
-.\scripts\winget-import.ps1 -s "Unity Hub"
+# Chỉ xem danh sách phần mềm đang cài trên máy có sẵn trên WinGet (chưa có trong TXA)
+txacli scan
+
+# Quét và tự động import tất cả vào kho manifests/
+txacli -i -y
+
+# Chạy chế độ chọn từng số (1,3,5 hoặc all)
+txacli -i
 ```
 
----
-
-## 4. Tạo kho riêng và thêm vào `txapm`
-
-Nếu muốn import ra một thư mục riêng để làm kho source nội bộ/cá nhân:
-
+### Import nhanh bất kỳ phần mềm nào theo Tên hoặc WinGet ID
 ```powershell
-# Import app và sinh luôn REST API txa.v1
-.\scripts\winget-import.ps1 --from-installed -y -o D:\my-txa-repo --build-api --api-out D:\my-txa-api
+# Import vào kho hiện tại
+txacli Microsoft.PowerToys "GitHub CLI" "Steam"
 
-# Thêm kho vừa tạo vào txapm
-txapm source add myrepo D:\my-txa-repo
+# Import ra kho riêng, tự động build REST API txa.v1 và thêm luôn vào txapm source
+txacli Postman.Postman -o C:\my-txa-repo --build-api --api-out C:\my-txa-api --add-source myrepo
+```
+
+### Submit PR từ thư mục Release, thư mục Repo gốc hoặc thư mục API (`submit`)
+`txacreate submit` và `txacli submit` hiện hỗ trợ truyền trực tiếp **thư mục gốc của repo** (`C:\my-txa-repo`), **thư mục API đã build** (`C:\my-txa-api`), hoặc **thư mục từng release**:
+```powershell
+txacli submit C:\my-txa-repo
+txacli submit C:\my-txa-api
+txacreate submit C:\my-txa-repo
+```
+
+### Validate & Build API nhanh
+```powershell
+txacli validate C:\my-txa-repo --offline
+txacli build-api -r C:\my-txa-repo -o C:\my-txa-api
 ```
 
 ---
 
-## Các tham số hỗ trợ (`winget-import.ps1`)
+## 2. Các lệnh mới trên `txapm`
 
-| Tham số | Ý nghĩa | Mặc định |
-|---|---|---|
-| `[packages ...]` | Tên phần mềm bất kỳ (copy từ `txapm list --all`) hoặc WinGet ID | |
-| `-i`, `--from-installed` | Tự động quét phần mềm đã cài trên máy chưa có trong TXA | |
-| `-y`, `--yes` | Tự động chạy toàn bộ không hỏi lại | |
-| `--txacreate` | Chuyển tiếp sang `txacreate new` (tải file thật & phân tích PE) | |
-| `-s`, `--search <từ-khóa>` | Tìm kiếm WinGet ID theo tên phần mềm | |
-| `-n`, `--namespace <tên>` | Namespace cho TXA package | `TXAVL` |
-| `--id <ID-cụ-thể>` | Đặt tên Package ID riêng (vd `TXAVL.Chrome`) | Tự sinh |
-| `-o`, `--out <thư-mục>` | Thư mục chứa manifests đầu ra | `./manifests` |
-| `--build-api` | Tự động chạy `txaci build-api` sau khi import | |
-| `--api-out <thư-mục>` | Thư mục chứa API tĩnh đầu ra | `dist/api` |
-| `--dry-run` | Xem trước, không ghi file | |
+Ngoài các lệnh cơ bản (`install`, `upgrade`, `uninstall`, `list`, `search`, `show`, `source`), `txapm` đã được bổ sung các lệnh tiện ích mới:
+
+### `txapm winget` (viết tắt: `txapm wg`)
+Làm việc trực tiếp với kho WinGet ngay trong `txapm`:
+```powershell
+# Tìm gói trên WinGet
+txapm wg search "PowerToys"
+
+# Cài đặt trực tiếp một gói từ WinGet thông qua cơ chế kiểm duyệt SHA-256 của txapm (kể cả khi chưa có trên kho TXA)
+txapm wg install Microsoft.PowerToys
+
+# Quét các phần mềm trên máy chưa có trong kho TXA
+txapm wg scan
+
+# Import gói từ WinGet vào kho local và tự gắn vào source
+txapm wg import Postman.Postman -o C:\my-txa-repo --add-source myrepo
+```
+
+### `txapm doctor` (viết tắt: `txapm check` / `txapm status`)
+Kiểm tra sức khỏe toàn diện hệ thống `txapm` (Windows build, kiến trúc CPU, trạng thái kết nối các `source`, WinGet CLI, tài khoản GitHub, dung lượng cache):
+```powershell
+txapm doctor
+```
+
+### `txapm clean` (viết tắt: `txapm cache` / `txapm clear`)
+Dọn dẹp bộ nhớ đệm (các file bộ cài tải tạm và file log cài đặt):
+```powershell
+txapm clean          # Xoá các bộ cài tải tạm trong thư mục downloads
+txapm clean --all    # Xoá cả bộ cài tạm lẫn toàn bộ file log cài đặt
+```
+
+### `txapm log` (viết tắt: `txapm logs`)
+Xem danh sách hoặc đọc nội dung log cài đặt của từng phần mềm:
+```powershell
+txapm log                  # Liệt kê các file log cài đặt gần nhất
+txapm log Postman -n 40    # Xem 40 dòng cuối log cài đặt của Postman
+```
+
+### `txapm which` (viết tắt: `txapm where`)
+Xem chi tiết thông tin bản ghi cài đặt trên máy (phiên bản, kiến trúc, engine, nguồn cài, thư mục portable, PATH, đường dẫn file log):
+```powershell
+txapm which Git
+```

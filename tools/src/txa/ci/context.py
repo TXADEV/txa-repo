@@ -16,7 +16,7 @@ import yaml
 
 from txa import __version__
 from txa.core import semver
-from txa.core.manifest import Bundle, find_repo_root
+from txa.core.manifest import Bundle, discover_releases, find_repo_root
 
 POLICY_FILE = "policy.txa.yaml"
 
@@ -230,6 +230,11 @@ def init_ci(repo_root: Path, base: str, head: str, pr: int | None, state_dir: Pa
 def init_local(release_dirs: list[Path], offline: bool = False,
                payloads: dict[str, dict[str, Path]] | None = None) -> Context:
     """Validate release directories on disk (used by `txaci validate` and txacreate)."""
+    expanded: list[Path] = []
+    for d in release_dirs:
+        found = discover_releases(Path(d))
+        expanded.extend(found if found else [Path(d)])
+    release_dirs = expanded
     first = Path(release_dirs[0]).resolve()
     repo_root = find_repo_root(first) or first.parent
     policy_file = repo_root / POLICY_FILE

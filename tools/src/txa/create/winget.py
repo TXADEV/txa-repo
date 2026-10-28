@@ -514,3 +514,187 @@ def populate_args_from_winget(args, data: dict[str, Any], namespace: str) -> lis
             args.progress = str(first_sw.get("SilentWithProgress") or def_sw.get("progress") or args.silent).strip()
 
     return [t["url"] for t in unique_targets]
+
+
+def sanitize_alias(moniker: str | None) -> str | None:
+    if not moniker:
+        return None
+    alias = re.sub(r"[^a-z0-9-]", "", moniker.strip().lower()).strip("-")
+    if 2 <= len(alias) <= 40 and re.match(r"^[a-z0-9][a-z0-9-]{1,39}$", alias):
+        return alias
+    return None
+
+
+def convert_winget_to_draft(data: dict[str, Any], namespace: str = "TXAVL", override_id: str | None = None):
+    """Convert WinGet metadata dictionary into a TXA Draft object."""
+    import textwrap
+    from pathlib import Path
+    from txa.create.draft import Draft, TargetDraft
+
+    pkg_id_raw = data.get("PackageIdentifier") or data.get("Id") or "App.Tool"
+    raw_name = data.get("PackageName") or data.get("Name") or pkg_id_raw.split(".")[-1]
+    raw_version = str(data.get("Version") or data.get("PackageVersion") or "1.0.0")
+
+    version = normalize_version(raw_version)
+
+    if override_id:
+        pkg_id = override_id
+    else:
+        pascal_app = derive_txa_app_name(pkg_id_raw, raw_name)
+        pkg_id = f"{namespace}.{pascal_app}"
+
+    name = (raw_name.strip() or "Tool")[:64]
+    if len(name) < 2:
+        name = f"{name} App"
+
+    pub = str(data.get("Publisher") or data.get("Author") or namespace).strip()[:128]
+    if len(pub) < 2:
+        pub = f"{pub} Team"
+    author = str(data.get("Author") or pub).strip()[:128]
+    if len(author) < 2:
+        author = pub
+
+    summary = str(data.get("ShortDescription") or data.get("Description") or f"{name} package for Windows.").strip()
+    summary = re.sub(r"\s+", " ", summary)
+    if len(summary) < 10:
+        summary = f"{name} official installer for Windows."
+    if len(summary) > 160:
+        cutoff = summary[:157].rfind(" ")
+        summary = summary[:cutoff if cutoff > 50 else 157] + "..."
+
+    description = str(data.get("Description") or "").strip()[:4000] or None
+    if description and summary and (description.lower() == summary.lower() or len(description) <= len(summary)):
+        description = None
+    elif description:
+        wrapped_lines = []
+        for paragraph in description.split("\n"):
+            p = paragraph.strip()
+            if p:
+                wrapped_lines.append(textwrap.fill(p, width=120))
+        description = "\n".join(wrapped_lines) if wrapped_lines else None
+
+    homepage = str(data.get("Homepage") or data.get("Publisher Url") or "").strip()
+    if not homepage.startswith("https://"):
+        homepage = None
+
+    raw_lic = str(data.get("License") or "").strip()
+    norm_lic = licenses.normalize(raw_lic) if raw_lic else None
+    if norm_lic and (norm_lic in licenses.SPDX or norm_lic in licenses.NEEDS_URL):
+        lic_name = norm_lic
+    elif "mit" in raw_lic.lower():
+        lic_name = "MIT"
+    elif "apache" in raw_lic.lower():
+        lic_name = "Apache-2.0"
+    elif "gpl" in raw_lic.lower():
+        lic_name = "GPL-3.0-or-later"
+    elif "bsd" in raw_lic.lower():
+        lic_name = "BSD-3-Clause"
+    else:
+        lic_name = "Proprietary"
+
+    lic_url = str(data.get("License Url") or "").strip()
+    if not lic_url.startswith("https://"):
+        lic_url = homepage if (homepage and lic_name in licenses.NEEDS_URL) else (
+            f"https://github.com/{config.get('upstream')}" if lic_name in licenses.NEEDS_URL else None
+        )
+
+    moniker = data.get("Moniker")
+    alias = sanitize_alias(moniker)
+    if not alias:
+        short = sanitize_alias(pkg_id.split(".")[-1])
+        if short and short != pkg_id.lower():
+            alias = short
+
+    raw_tags = data.get("Tags") or []
+    if isinstance(raw_tags, str):
+        raw_tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+    cleaned_tags = []
+    for t in raw_tags:
+        ct = clean_tag(t)
+        if ct and ct not in cleaned_tags:
+            cleaned_tags.append(ct)
+        if len(cleaned_tags) >= 16:
+            break
+
+    targets_data = data.get("_targets") or {}
+    target_drafts = []
+
+    for arch, tinfo in targets_data.items():
+        url = tinfo["url"]
+        if not url.startswith("https://"):
+            continue
+        sha = tinfo["sha256"]
+        engine = tinfo.get("engine") or ENGINE_MAP.get(tinfo.get("type", "exe").lower(), "exe")
+
+        switches = dict(DEFAULT_SWITCHES.get(engine, {}))
+        custom_sw = tinfo.get("switches", {})
+        if isinstance(custom_sw, dict):
+            if custom_sw.get("Silent"):
+                switches["silent"] = str(custom_sw["Silent"]).strip()
+            if custom_sw.get("SilentWithProgress"):
+                switches["progress"] = str(custom_sw["SilentWithProgress"]).strip()
+            if custom_sw.get("Custom"):
+                switches["custom"] = str(custom_sw["Custom"]).strip()
+
+        portable_dict = {}
+        if engine == "portable":
+            portable_dict = {"path": ["."]}
+
+        target_drafts.append(TargetDraft(
+            url=url,
+            arch=arch,
+            engine=engine,
+            sha256=sha,
+            size=1,
+            payload=Path(""),
+            switches=switches,
+            portable=portable_dict,
+        ))
+
+    return Draft(
+        package_id=pkg_id,
+        version=version,
+        name=name,
+        publisher=pub,
+        author=author,
+        summary=summary,
+        description=description,
+        homepage=homepage,
+        license_name=lic_name,
+        license_url=lic_url,
+        alias=alias,
+        tags=cleaned_tags,
+        targets=target_drafts,
+    )
+
+
+def validate_draft(draft) -> list[str]:
+    """Validate Draft against TXA JSON schemas."""
+    from txa.core.manifest import BUILD_FILE, CORE_FILE, about_file, schema_errors
+
+    cards = draft.cards()
+    errors = []
+    for kind, card in [("core", cards[CORE_FILE]), ("build", cards[BUILD_FILE]), ("about", cards[about_file(draft.lang)])]:
+        errs = schema_errors(kind, card)
+        for e in errs:
+            errors.append(f"{kind}: {e}")
+    return errors
+
+
+def save_draft_manifests(draft, root_dir, dry_run: bool = False):
+    """Save rendered manifests to <root_dir>/manifests/<shard>/<Namespace>/<AppName>/<Version>/ with LF endings."""
+    from pathlib import Path
+
+    root_path = Path(root_dir)
+    rel_path = draft.directory
+    target_dir = root_path / rel_path
+    if dry_run:
+        return target_dir
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    rendered = draft.render()
+    for filename, content in rendered.items():
+        content_lf = content.replace("\r\n", "\n")
+        (target_dir / filename).write_text(content_lf, encoding="utf-8", newline="\n")
+    return target_dir
+

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "txa"
 dynamic = ["version"]
-description = "TXA package manager toolchain: txapm (install), txacreate (publish), txaci (16-step validator)"
+description = "TXA package manager toolchain: txapm (install), txacreate (publish), txaci (16-step validator), txacli (WinGet & repo CLI)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -28,6 +28,7 @@ build = ["pyinstaller>=6.6"]
 txapm = "txa.pm.cli:main"
 txacreate = "txa.create.cli:main"
 txaci = "txa.ci.cli:main"
+txacli = "txa.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "txa.__version__" }

@@ -1,23 +1,22 @@
 <#
 .SYNOPSIS
-    Convenience wrapper for importing WinGet packages into TXA.
-.EXAMPLE
-    .\scripts\winget-import.ps1 -s "vscode"
-    .\scripts\winget-import.ps1 7zip.7zip --dry-run
-    .\scripts\winget-import.ps1 Google.Chrome
+    Compatibility wrapper for `txacli` (WinGet to TXA Package Importer).
+    Prefer using `txacli` directly from your terminal!
 #>
+$ErrorActionPreference = "Stop"
+
+if (Get-Command txacli -ErrorAction SilentlyContinue) {
+    & txacli @args
+    exit $LASTEXITCODE
+}
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$PythonExe = Join-Path $RepoRoot "tools\.venv\Scripts\python.exe"
+$VenvPy = Join-Path $RepoRoot "tools\.venv\Scripts\python.exe"
+$ScriptPath = Join-Path $PSScriptRoot "winget-import.py"
 
-if (-not (Test-Path $PythonExe)) {
-    $PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (Test-Path $VenvPy) {
+    & $VenvPy $ScriptPath @args
+} else {
+    & python $ScriptPath @args
 }
-
-if (-not $PythonExe) {
-    Write-Error "Python was not found. Please activate tools\.venv or install Python 3.10+."
-    exit 1
-}
-
-$ScriptPy = Join-Path $PSScriptRoot "winget-import.py"
-& $PythonExe $ScriptPy $args
 exit $LASTEXITCODE

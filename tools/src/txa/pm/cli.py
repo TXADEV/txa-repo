@@ -584,6 +584,14 @@ def cmd_search(args) -> int:
     waiting = sources.pending_matching(args.text)
     if not hits and not waiting:
         console.say(f"! no packages found for '{args.text}' - the repository may be empty or the name differs")
+        if args.source:
+            try:
+                other_hits = Sources(None).search(args.text)
+                if other_hits:
+                    found_in = ", ".join(f"{h['id']} ({s.name})" for s, h in other_hits[:3])
+                    console.say(f"  hint: found in other source(s): {P(found_in, 'cyan')} — omit '-s {args.source}' to search all sources")
+            except Exception:
+                pass
         return 1
     safe = console.safe
     if hits:
@@ -636,6 +644,203 @@ def cmd_import(args) -> int:
     console.say(f"{'✓' if not failures else '!'} import finished: {len(packages) - failures} of {len(packages)} installed, "
                 f"{failures} failure(s)")
     return 1 if failures else 0
+
+
+def cmd_clean(args) -> int:
+    """Clean temporary installer downloads and optionally install logs."""
+    freed = 0
+    removed_files = 0
+    targets = [("downloads", config.temp_root())]
+    if getattr(args, "logs", False) or getattr(args, "all", False):
+        targets.append(("logs", config.txa_home() / "logs"))
+
+    for label, folder in targets:
+        if not folder.is_dir():
+            continue
+        for item in list(folder.iterdir()):
+            try:
+                if item.is_file():
+                    freed += item.stat().st_size
+                    item.unlink(missing_ok=True)
+                    removed_files += 1
+                elif item.is_dir():
+                    for sub in item.rglob("*"):
+                        if sub.is_file():
+                            freed += sub.stat().st_size
+                            removed_files += 1
+                    shutil.rmtree(item, ignore_errors=True)
+            except OSError:
+                continue
+    console.say(f"✓ cleaned {removed_files} file(s) ({console.human_size(freed)} freed)")
+    return 0
+
+
+def cmd_log(args) -> int:
+    """List or view installer logs from ~/.txa/logs."""
+    log_dir = config.txa_home() / "logs"
+    if not log_dir.is_dir():
+        console.say("! no installer logs yet")
+        return 0
+    logs = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not logs:
+        console.say("! no installer logs yet")
+        return 0
+    if not args.package:
+        print(console.head(f"{'Log File':<44} {'Size':<12} Modified"))
+        for lg in logs[:25]:
+            st = lg.stat()
+            mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{C(lg.name, 44, 'cyan')} {C(console.human_size(st.st_size), 12, 'gray')} {mtime}")
+        return 0
+    q = args.package.lower()
+    matched = next((lg for lg in logs if q in lg.name.lower()), None)
+    if not matched:
+        return _die(f"no log found matching '{args.package}'")
+    print(console.paint(f"# {matched} ({console.human_size(matched.stat().st_size)})", "bold", "cyan"))
+    lines = matched.read_text("utf-8", errors="replace").splitlines()
+    tail = args.tail or 50
+    for line in lines[-tail:]:
+        print(line)
+    return 0
+
+
+def cmd_which(args) -> int:
+    """Show installation details, paths, and logs for an installed package."""
+    records = installer.installed()
+    q = args.package.lower()
+    pkg_id = next((k for k in records if k.lower() == q or k.split(".")[-1].lower() == q), None)
+    if not pkg_id:
+        return _die(f"'{args.package}' is not recorded as installed through txapm (try `txapm list --all`)")
+    info = records[pkg_id]
+    print(f"{P(info.get('name', pkg_id), 'bold', 'cyan')} {P(info['version'], 'green', 'bold')}  {P('(' + pkg_id + ')', 'gray')}")
+    rows = [
+        ("arch", info.get("arch", "-")),
+        ("engine", info.get("engine", "-")),
+        ("scope", info.get("scope", "machine")),
+        ("source", info.get("source", config.OFFICIAL_SOURCE)),
+        ("installed", info.get("installed", "-")),
+    ]
+    if info.get("dir"):
+        rows.append(("folder", info["dir"]))
+    if info.get("path_dirs"):
+        rows.append(("PATH", ", ".join(info["path_dirs"])))
+    log_file = config.txa_home() / "logs" / f"{pkg_id}-{info['version']}.log"
+    if log_file.is_file():
+        rows.append(("log", str(log_file)))
+    for k, v in rows:
+        print(f"  {console.label(k, 11)}{v}")
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    """Run health diagnostics on txapm, sources, WinGet, and local environment."""
+    import subprocess
+    from txa.core import credentials
+
+    print(f"{P('TXA Doctor', 'bold', 'cyan')} · txapm {P(__version__, 'green', 'bold')}\n")
+    current = winos.current()
+    print(f"  {P('✓', 'green')} Windows:     {winos.fmt(current) if current else 'unknown'} ({winos.native_arch()}) · admin={installer.is_admin()}")
+
+    # Sources check
+    for src_cfg in config.sources():
+        if not src_cfg.get("enabled", True):
+            print(f"  {P('-', 'gray')} Source '{src_cfg['name']}': disabled ({src_cfg['url']})")
+            continue
+        try:
+            s = Sources(src_cfg["name"]).items[0]
+            cnt = s.index().get("count", 0)
+            print(f"  {P('✓', 'green')} Source '{P(src_cfg['name'], 'magenta')}': online · {P(str(cnt), 'bold')} package(s) ({src_cfg['url']})")
+        except Exception as exc:
+            print(f"  {P('✗', 'red')} Source '{src_cfg['name']}': error ({exc})")
+
+    # WinGet check
+    try:
+        res = subprocess.run(["winget", "--version"], capture_output=True, text=True, timeout=5)
+        wg_ver = res.stdout.strip() if res.returncode == 0 else None
+    except Exception:
+        wg_ver = None
+    if wg_ver:
+        print(f"  {P('✓', 'green')} WinGet CLI:  {wg_ver} (ready for `txacli` & `txapm winget`)")
+    else:
+        print(f"  {P('!', 'yellow')} WinGet CLI:  not found in PATH")
+
+    # GitHub credentials
+    rec = credentials.stored()
+    if rec and rec.get("login"):
+        print(f"  {P('✓', 'green')} GitHub Auth: signed in as {P(rec['login'], 'cyan')}")
+    else:
+        print(f"  {P('-', 'gray')} GitHub Auth: not signed in (optional; run `txacreate token --store` for PRs)")
+
+    # Installed & cache stats
+    records = installer.installed()
+    temp_bytes = sum(f.stat().st_size for f in config.temp_root().rglob("*") if f.is_file()) if config.temp_root().is_dir() else 0
+    print(f"  {P('✓', 'green')} Installed:   {len(records)} package(s) managed by txapm · {len(installer.pins())} pinned")
+    print(f"  {P('✓', 'green')} Cache size:  {console.human_size(temp_bytes)} in {config.temp_root()} (clean with `txapm clean`)")
+    return 0
+
+
+def cmd_winget(args) -> int:
+    """Search, install, scan, or import packages directly from WinGet inside txapm."""
+    import tempfile
+    from txa.cli import do_import, do_scan, do_search
+    from txa.create import winget as wg
+
+    action = (args.action or "").lower()
+    rest = list(args.targets or [])
+
+    if getattr(args, "search_query", None):
+        return do_search(args.search_query)
+
+    if action in ("search", "find", "s"):
+        q = " ".join(rest).strip()
+        if not q:
+            return _die("usage: txapm winget search <query>")
+        return do_search(q)
+
+    if action in ("scan", "list", "ls"):
+        do_scan()
+        return 0
+
+    if action in ("install", "add"):
+        if not rest:
+            return _die("usage: txapm winget install <package_name_or_winget_id>")
+        failures = 0
+        for query in rest:
+            console.say(f"→ resolving '{P(query, 'cyan')}' from WinGet…")
+            wg_id = wg.resolve_to_winget_id(query)
+            if not wg_id:
+                console.say(f"✗ could not find '{query}' on WinGet")
+                failures += 1
+                continue
+            data = wg.query_winget_package(wg_id)
+            if not data:
+                console.say(f"✗ no supported HTTPS installer found for '{wg_id}'")
+                failures += 1
+                continue
+            draft = wg.convert_winget_to_draft(data)
+            work_root = Path(tempfile.mkdtemp(prefix="wg-install-", dir=config.temp_root()))
+            rel_dir = wg.save_draft_manifests(draft, work_root)
+            args.manifest = str(rel_dir)
+            args.package = None
+            args.version = None
+            args.download_only = False
+            failures += cmd_install(args) != 0
+        return 1 if failures else 0
+
+    if action in ("import", "in"):
+        args.packages = rest
+        return do_import(args)
+
+    # If no explicit sub-action word was given, treat `action` as a package name to import (or scan if -i)
+    if getattr(args, "from_installed", False):
+        args.packages = ([ args.action ] if args.action else []) + rest
+        return do_import(args)
+    if args.action:
+        args.packages = [args.action, *rest]
+        return do_import(args)
+
+    console.say("usage: txapm winget <search|install|import|scan> [args...]")
+    return 0
 
 
 # --------------------------------------------------------------------------- entry
@@ -741,6 +946,38 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("paths", nargs="+")
     p.add_argument("--offline", action="store_true")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("winget", aliases=["wg"], help="search, install, scan, or import packages from WinGet")
+    p.add_argument("action", nargs="?", help="search | install | import | scan (or package name)")
+    p.add_argument("targets", nargs="*", help="query or package names/IDs")
+    p.add_argument("-s", "--search", dest="search_query", help="search WinGet for matching packages")
+    p.add_argument("-i", "--from-installed", action="store_true", help="scan installed PC apps and import missing ones")
+    p.add_argument("-o", "--out", default=None, help="output repo directory for import")
+    p.add_argument("--build-api", action="store_true", help="build static txa.v1 REST API after import")
+    p.add_argument("--api-out", default="dist/api", help="destination folder for built API")
+    p.add_argument("--add-source", metavar="NAME", help="register output repo as a txapm source")
+    p.add_argument("--submit", action="store_true", help="open a pull request after importing")
+    p.add_argument("--dry-run", action="store_true", help="preview generated manifests without writing")
+    p.add_argument("-y", "--yes", action="store_true", help="do not prompt when importing")
+    _install_options(p)
+    p.set_defaults(func=cmd_winget)
+
+    p = sub.add_parser("clean", aliases=["cache", "clear"], help="clean temporary installer downloads and logs")
+    p.add_argument("--logs", action="store_true", help="also delete installer log files")
+    p.add_argument("--all", action="store_true", help="delete both cached downloads and logs")
+    p.set_defaults(func=cmd_clean)
+
+    p = sub.add_parser("log", aliases=["logs"], help="list or view installer logs")
+    p.add_argument("package", nargs="?", help="package id or name to view its latest log")
+    p.add_argument("-n", "--tail", type=int, default=50, help="number of lines to show (default: 50)")
+    p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("which", aliases=["where"], help="show local installation path, scope, and record of a package")
+    p.add_argument("package", help="package id or short name")
+    p.set_defaults(func=cmd_which)
+
+    p = sub.add_parser("doctor", aliases=["check", "status"], help="check system health, sources, WinGet, and cache")
+    p.set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)
     if args.info:
