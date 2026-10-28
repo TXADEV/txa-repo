@@ -9,11 +9,11 @@ platform:
 scope: machine
 targets:
   - arch: x64
-    engine: wix
+    engine: msi
     source:
       url: https://content.warframe.com/dl/Warframe.msi
       sha256: 033EF04ABA5F1CCE000D3A28CB317B8547E2352B2C7D813B4459AE949399B69C
       size: 1
     switches:
-      silent: /quiet /norestart
-      progress: /passive /norestart
+      silent: /qn /norestart
+      progress: /qb! /norestart

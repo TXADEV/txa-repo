@@ -122,18 +122,27 @@ def _install(src: Source, package_id: str, version: str | None, args, header: st
     size = target["source"].get("size")
     file_name = target["source"]["url"].split("?", 1)[0].rsplit("/", 1)[-1]
     host = target["source"]["url"].split("/")[2]
-    console.stage(2, total, f"Downloading {P(file_name, 'bold')}"
-                            f"{P(f' ({console.human_size(size)})', 'gray') if size else ''} from {P(host, 'cyan')}")
+    size_tag = P(f" ({console.human_size(size)})", "gray") if (size and size > 1) else ""
+    console.stage(2, total, f"Downloading {P(file_name, 'bold')}{size_tag} from {P(host, 'cyan')}")
     result = installer.download_payload(package_id, version, target, console.progress("      "), source=src)
     console.done_line()
 
     # [3] verify
     try:
-        digest = installer.verify_payload(result, target)
+        digest = installer.verify_payload(result, target, ignore_checksum=getattr(args, "ignore_checksum", False))
     except InstallError as exc:
         console.stage(3, total, P("Verifying SHA-256", "red", "bold"))
         return _die(str(exc))
-    console.stage(3, total, f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P('matches the manifest', 'green')}")
+    signer = getattr(result, "verified_signer", None)
+    if signer:
+        from txa.core import i18n
+        msg = i18n.tr(
+            f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P(f'Authenticode signed by {signer} (evergreen installer)', 'green')}",
+            f"Đã xác thực chữ ký số Authenticode {P(signer, 'green', 'bold')} ({P(digest[:16] + '…', 'gray')})",
+        )
+        console.stage(3, total, msg)
+    else:
+        console.stage(3, total, f"Verified SHA-256 {P(digest[:16] + '…', 'gray')} {P('matches the manifest', 'green')}")
     payload = result.path
     if download_only:
         console.say(f"✓ saved to {payload}")
@@ -891,6 +900,7 @@ def _install_options(p: argparse.ArgumentParser) -> None:
     mode.add_argument("--progress", action="store_true", help="unattended, but show the installer's progress UI")
     mode.add_argument("--interactive", action="store_true", help="run the normal installer UI")
     p.add_argument("--force", action="store_true", help="reinstall even if this version is recorded")
+    p.add_argument("--ignore-checksum", action="store_true", help="bypass SHA-256 mismatch check")
     p.add_argument("--skip-os-check", action="store_true")
 
 

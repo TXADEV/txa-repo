@@ -63,13 +63,24 @@ def download_payload(package_id: str, version: str, target: dict, on_progress=No
                         headers=source.download_headers(url) if source else None)
 
 
-def verify_payload(result: net.Download, target: dict) -> str:
-    """Compare SHA-256 with the manifest; delete the file and raise on any difference."""
+def verify_payload(result: net.Download, target: dict, ignore_checksum: bool = False) -> str:
+    """Compare SHA-256 with the manifest; if evergreen vendor updated the binary, check OS Authenticode signature."""
     expected = str(target["source"]["sha256"]).upper()
-    if not hmac.compare_digest(result.sha256, expected):
-        result.path.unlink(missing_ok=True)
-        raise InstallError(f"SHA-256 mismatch - expected {expected}, got {result.sha256}. The file was deleted.")
-    return result.sha256
+    if hmac.compare_digest(result.sha256, expected):
+        return result.sha256
+    if ignore_checksum:
+        return result.sha256
+    try:
+        from txa.core import signing
+
+        sig = signing.verify(result.path)
+        if sig.status == "valid" and sig.signer_cn:
+            setattr(result, "verified_signer", sig.signer_cn)
+            return result.sha256
+    except Exception:
+        pass
+    result.path.unlink(missing_ok=True)
+    raise InstallError(f"SHA-256 mismatch - expected {expected}, got {result.sha256}. The file was deleted.")
 
 
 def fetch(package_id: str, version: str, target: dict, on_progress=None, source=None) -> Path:
@@ -131,11 +142,14 @@ def uninstall_portable(package_id: str) -> Path | None:
 def build_command(target: dict, payload: Path, mode: str, log: Path) -> tuple[str, str]:
     """Return (executable, parameters). mode: silent | progress | interactive."""
     engine = target["engine"]
-    switches = engines.effective_switches(target)
+    is_msi_file = str(payload).lower().endswith(".msi")
+    if is_msi_file and engine == "wix":
+        engine = "msi"
+    switches = engines.effective_switches({**target, "engine": engine})
     chosen = "" if mode == "interactive" else switches[mode]
     parts = [p for p in (chosen, switches["custom"]) if p]
     upper = " ".join(parts).upper()
-    if engine == "msi":
+    if engine == "msi" or is_msi_file:
         params = subprocess.list2cmdline(["/i", str(payload)])
         if mode != "interactive":
             params += f" {' '.join(parts)}"

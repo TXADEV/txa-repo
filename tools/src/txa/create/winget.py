@@ -19,7 +19,7 @@ ENGINE_MAP = {
     "nullsoft": "nsis",
     "nsis": "nsis",
     "msi": "msi",
-    "wix": "wix",
+    "wix": "msi",
     "burn": "wix",
     "zip": "portable",
     "portable": "portable",
