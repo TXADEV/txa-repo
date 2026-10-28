@@ -939,7 +939,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("help", help="show help for txacreate or a specific command")
     p.add_argument("topic", nargs="?", help="command name")
 
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] in ("--clear", "--store"):
+        raw_argv = ["token", *raw_argv]
+    elif raw_argv and raw_argv[0] in ("-i", "--from-installed"):
+        raw_argv = ["new", *raw_argv]
+
+    args = parser.parse_args(raw_argv)
     if args.command is None:
         parser.print_help()
         return 0

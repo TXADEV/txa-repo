@@ -592,13 +592,14 @@ class SmartArgumentParser(argparse.ArgumentParser):
 
         return i18n.translate(super().format_usage())
 
-    def _all_flags_and_subcommands(self) -> tuple[list[str], list[str]]:
-        flags: list[str] = []
+    def _all_flags_and_subcommands(self) -> tuple[list[str], dict[str, list[str]], list[str]]:
+        own_flags: list[str] = []
+        sub_flags: dict[str, list[str]] = {}
         subcmds: list[str] = []
         for action in self._actions:
             for opt in getattr(action, "option_strings", ()):
-                if opt not in flags:
-                    flags.append(opt)
+                if opt not in own_flags:
+                    own_flags.append(opt)
             choices = getattr(action, "choices", None)
             if isinstance(choices, dict):
                 for cmd_name, subparser in choices.items():
@@ -606,9 +607,12 @@ class SmartArgumentParser(argparse.ArgumentParser):
                         subcmds.append(cmd_name)
                     for sub_act in getattr(subparser, "_actions", ()):
                         for opt in getattr(sub_act, "option_strings", ()):
-                            if opt not in flags:
-                                flags.append(opt)
-        return flags, subcmds
+                            if opt in ("-h", "--help"):
+                                continue
+                            sub_flags.setdefault(opt, [])
+                            if cmd_name not in sub_flags[opt]:
+                                sub_flags[opt].append(cmd_name)
+        return own_flags, sub_flags, subcmds
 
     def error(self, message: str):
         from txa.core import i18n
@@ -631,12 +635,23 @@ class SmartArgumentParser(argparse.ArgumentParser):
             m_unrec = re.search(r"unrecognized arguments:\s*(.+)$", message)
             if m_unrec:
                 bad_tok = m_unrec.group(1).strip().split()[0]
-                flags, subcmds = self._all_flags_and_subcommands()
+                own_flags, sub_flags, subcmds = self._all_flags_and_subcommands()
                 if bad_tok.startswith("-"):
-                    matches = suggest_words(bad_tok, flags)
+                    matches = suggest_words(bad_tok, own_flags)
                     if matches:
                         styled = ", ".join(paint(m, "green", "bold", stream=sys.stderr) for m in matches)
                         hint_line = f"  {paint(lbl_flg, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+                    elif sub_flags:
+                        sub_matches = suggest_words(bad_tok, list(sub_flags.keys()))
+                        if sub_matches:
+                            cmd_hints: list[str] = []
+                            for sm in sub_matches:
+                                for cname in sub_flags.get(sm, ())[:2]:
+                                    full = f"{self.prog} {cname} {sm}"
+                                    if full not in cmd_hints:
+                                        cmd_hints.append(full)
+                            styled = ", ".join(paint(c, "green", "bold", stream=sys.stderr) for c in cmd_hints[:3])
+                            hint_line = f"  {paint(lbl_cmd, 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
                 else:
                     matches = suggest_words(bad_tok, subcmds)
                     if matches:
