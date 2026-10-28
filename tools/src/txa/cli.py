@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         if first in ("import", "add", "in"):
             args_list = args_list[1:]
 
-    parser = argparse.ArgumentParser(
+    parser = console.SmartArgumentParser(
         prog="txacli",
         description="TXA Fast CLI: WinGet importer, scanner, API builder, and PR submitter.",
         epilog=(

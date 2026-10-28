@@ -842,7 +842,7 @@ def _release_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = argparse.ArgumentParser(prog="txacreate", description="Publish installers to the TXA repository",
+    parser = console.SmartArgumentParser(prog="txacreate", description="Publish installers to the TXA repository",
         epilog='examples:\n  txacreate new https://vendor.example/app-1.2.3-x64.exe\n  txacreate update TXAVL.HelloTool https://vendor.example/app-1.2.4-x64.exe\n  txacreate hash setup.exe', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txacreate {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")

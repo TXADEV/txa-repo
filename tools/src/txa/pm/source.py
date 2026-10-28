@@ -266,7 +266,10 @@ class Sources:
         if only:
             chosen = [s for s in configured if s["name"].lower() == only.lower()]
             if not chosen:
-                raise SourceError(f"no source named '{only}' (see `txapm source list`)")
+                from txa.core import console
+                matches = console.suggest_words(only, [s["name"] for s in configured])
+                hint = f" — did you mean '{matches[0]}'? (see `txapm source list`)" if matches else " (see `txapm source list`)"
+                raise SourceError(f"no source named '{only}'{hint}")
         else:
             chosen = [s for s in configured if s.get("enabled", True)]
         if not chosen:
@@ -328,4 +331,37 @@ class Sources:
                 out += [(source, entry) for entry in source.search(text)]
             except Exception:
                 continue
+        return out
+
+    def suggest(self, query: str, limit: int = 3) -> list[str]:
+        """Suggest closest package IDs / aliases when a user mistypes a package name."""
+        from txa.core import console
+
+        q = query.strip().split(".")[-1] if "." in query else query.strip()
+        if not q:
+            return []
+        lookup: dict[str, str] = {}
+        for source in self.items:
+            try:
+                for entry in source.index().get("packages", []):
+                    pkg_id = entry["id"]
+                    alias = entry.get("alias")
+                    label = f"{pkg_id} ({alias})" if alias else pkg_id
+                    short = pkg_id.split(".")[-1]
+                    lookup[short.lower()] = label
+                    lookup[pkg_id.lower()] = label
+                    if alias:
+                        lookup[alias.lower()] = label
+                    for a in entry.get("aliases", []):
+                        lookup[str(a).lower()] = label
+            except Exception:
+                continue
+        matched_keys = console.suggest_words(q, list(lookup.keys()), limit=limit * 2)
+        out: list[str] = []
+        for k in matched_keys:
+            val = lookup[k]
+            if val not in out:
+                out.append(val)
+            if len(out) >= limit:
+                break
         return out

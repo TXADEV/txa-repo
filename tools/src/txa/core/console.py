@@ -435,3 +435,142 @@ def ask(prompt: str, default: str | None = None) -> str:
     except EOFError:
         answer = ""
     return answer or (default or "")
+
+
+# --------------------------------------------------------------------------- smart CLI typo suggestions
+
+import argparse  # noqa: E402
+import difflib  # noqa: E402
+
+_COMMON_COMMAND_HINTS: dict[str, str] = {
+    "i": "install",
+    "in": "install",
+    "ins": "install",
+    "instal": "install",
+    "isntall": "install",
+    "get": "install",
+    "del": "uninstall",
+    "delete": "uninstall",
+    "erase": "uninstall",
+    "uninstal": "uninstall",
+    "unin": "uninstall",
+    "up": "upgrade",
+    "upgarde": "upgrade",
+    "ugprade": "upgrade",
+    "upd": "upgrade",
+    "s": "search",
+    "serach": "search",
+    "seach": "search",
+    "srch": "search",
+    "query": "search",
+    "info": "show",
+    "detail": "show",
+    "details": "show",
+    "doc": "doctor",
+    "doctr": "doctor",
+    "health": "doctor",
+    "diag": "doctor",
+    "cls": "clean",
+    "purge": "clean",
+    "src": "source",
+    "sources": "source",
+    "repo": "source",
+    "repos": "source",
+    "wg": "winget",
+    "win": "winget",
+    "sub": "submit",
+    "submt": "submit",
+    "push": "submit",
+    "pr": "submit",
+    "val": "validate",
+    "valid": "validate",
+    "valdiate": "validate",
+    "create": "new",
+    "init": "new",
+}
+
+
+def suggest_words(bad: str, candidates: list[str] | set[str] | tuple[str, ...], limit: int = 3) -> list[str]:
+    """Return up to ``limit`` closest matches for a mistyped command, flag, or package name."""
+    b = bad.strip().lower()
+    if not b or not candidates:
+        return []
+    cand_list = list(candidates)
+    by_lower = {c.lower(): c for c in cand_list}
+    out: list[str] = []
+
+    def _add(item: str) -> None:
+        if item not in out and len(out) < limit:
+            out.append(item)
+
+    if b in _COMMON_COMMAND_HINTS and _COMMON_COMMAND_HINTS[b] in by_lower:
+        _add(by_lower[_COMMON_COMMAND_HINTS[b]])
+
+    if len(b) >= 2:
+        for k, orig in by_lower.items():
+            if k.startswith(b) or (not b.startswith("-") and b in k and len(b) >= 3):
+                _add(orig)
+
+    for close in difflib.get_close_matches(b, list(by_lower.keys()), n=limit, cutoff=0.45):
+        _add(by_lower[close])
+
+    return out
+
+
+class SmartArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that automatically suggests closest commands or flags on typos."""
+
+    def add_subparsers(self, **kwargs):
+        kwargs.setdefault("parser_class", SmartArgumentParser)
+        return super().add_subparsers(**kwargs)
+
+    def _all_flags_and_subcommands(self) -> tuple[list[str], list[str]]:
+        flags: list[str] = []
+        subcmds: list[str] = []
+        for action in self._actions:
+            for opt in getattr(action, "option_strings", ()):
+                if opt not in flags:
+                    flags.append(opt)
+            choices = getattr(action, "choices", None)
+            if isinstance(choices, dict):
+                for cmd_name, subparser in choices.items():
+                    if cmd_name not in subcmds:
+                        subcmds.append(cmd_name)
+                    for sub_act in getattr(subparser, "_actions", ()):
+                        for opt in getattr(sub_act, "option_strings", ()):
+                            if opt not in flags:
+                                flags.append(opt)
+        return flags, subcmds
+
+    def error(self, message: str):
+        self.print_usage(sys.stderr)
+        hint_line = ""
+
+        m_choice = re.search(r"invalid choice:\s*'([^']+)'\s*\(choose from ([^)]+)\)", message)
+        if m_choice:
+            bad = m_choice.group(1)
+            raw_choices = [c.strip().strip("'\"") for c in m_choice.group(2).split(",")]
+            matches = suggest_words(bad, raw_choices)
+            if matches:
+                styled = ", ".join(paint(f"{self.prog} {m}", "green", "bold", stream=sys.stderr) for m in matches)
+                hint_line = f"  {paint('→ Did you mean / Gợi ý lệnh:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+
+        if not hint_line:
+            m_unrec = re.search(r"unrecognized arguments:\s*(.+)$", message)
+            if m_unrec:
+                bad_tok = m_unrec.group(1).strip().split()[0]
+                flags, subcmds = self._all_flags_and_subcommands()
+                if bad_tok.startswith("-"):
+                    matches = suggest_words(bad_tok, flags)
+                    if matches:
+                        styled = ", ".join(paint(m, "green", "bold", stream=sys.stderr) for m in matches)
+                        hint_line = f"  {paint('→ Did you mean flag / Gợi ý tham số:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+                else:
+                    matches = suggest_words(bad_tok, subcmds)
+                    if matches:
+                        styled = ", ".join(paint(f"{self.prog} {m}", "green", "bold", stream=sys.stderr) for m in matches)
+                        hint_line = f"  {paint('→ Did you mean / Gợi ý lệnh:', 'cyan', 'bold', stream=sys.stderr)} {styled}\n"
+
+        err_prefix = paint(f"{self.prog}: error:", "red", "bold", stream=sys.stderr)
+        self.exit(2, f"{err_prefix} {message}\n{hint_line}")
+

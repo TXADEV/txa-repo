@@ -584,6 +584,10 @@ def cmd_search(args) -> int:
     waiting = sources.pending_matching(args.text)
     if not hits and not waiting:
         console.say(f"! no packages found for '{args.text}' - the repository may be empty or the name differs")
+        suggestions = sources.suggest(args.text)
+        if suggestions:
+            styled = ", ".join(P(s, "green", "bold") for s in suggestions)
+            console.say(f"  {P('→ Did you mean / Gợi ý gói:', 'cyan', 'bold')} {styled}")
         if args.source:
             try:
                 other_hits = Sources(None).search(args.text)
@@ -857,7 +861,7 @@ def _install_options(p: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     console.setup()
-    parser = argparse.ArgumentParser(prog="txapm", description="TXA package manager",
+    parser = console.SmartArgumentParser(prog="txapm", description="TXA package manager",
         epilog='examples:\n  txapm search notepad\n  txapm install TXAVL.HelloTool\n  txapm upgrade --all\n  txapm uninstall TXAVL.HelloTool', formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"txapm {__version__}")
     parser.add_argument("--info", action="store_true", help="show version, paths, source and account")
@@ -987,7 +991,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return args.func(args)
-    except (InstallError, NotFound, SourceError, net.NetError) as exc:
+    except NotFound as exc:
+        rc = _die(str(exc))
+        pkg_arg = getattr(args, "package", None)
+        if pkg_arg:
+            try:
+                suggestions = Sources(getattr(args, "source", None)).suggest(pkg_arg)
+                if suggestions:
+                    styled = ", ".join(P(s, "green", "bold") for s in suggestions)
+                    console.say(f"  {P('→ Did you mean / Gợi ý gói:', 'cyan', 'bold')} {styled}")
+            except Exception:
+                pass
+        return rc
+    except (InstallError, SourceError, net.NetError) as exc:
         return _die(str(exc))
     except KeyboardInterrupt:
         return _die("cancelled")
