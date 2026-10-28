@@ -97,6 +97,17 @@ Một số lệnh có tên viết tắt: `add` = install, `rm` = uninstall, `ls`
 | `TXAVL.ShareX` | `sharex` | ShareX — chụp và quay màn hình | 21.0.0 |
 | `TXAVL.Audacity` | `audacity` | Audacity — chỉnh sửa âm thanh | 4.0.1 |
 | `TXAVL.Obsidian` | `obsidian` | Obsidian — ghi chú Markdown | 1.14.5 |
+| `TXAVL.Chrome` | `chrome` | Google Chrome — trình duyệt web | 156.0.8078 |
+| `TXAVL.VisualStudioCode` | `vscode` | Visual Studio Code — trình soạn thảo mã nguồn | 1.142.0 |
+| `TXAVL.Brave` | `brave` | Brave Browser — trình duyệt web bảo mật | 155.1.97 |
+| `TXAVL.Spotify` | `spotify` | Spotify — nghe nhạc trực tuyến | 1.3.6 |
+| `TXAVL.Discord` | `discord` | Discord — trò chuyện và giao tiếp | 1.0.9266 |
+| `TXAVL.TelegramDesktop` | `telegram` | Telegram — nhắn tin bảo mật | 7.3.3 |
+| `TXAVL.PuTTY` | `putty` | PuTTY — SSH và telnet client | 0.85.0 |
+| `TXAVL.Rustup` | `rustup` | Rustup — bộ cài đặt và quản lý Rust | 1.29.1 |
+| `TXAVL.GIMP` | `gimp` | GIMP — phần mềm chỉnh sửa ảnh mã nguồn mở | 3.2.6 |
+| `TXAVL.OhMyPosh` | `ohmyposh` | Oh My Posh — tùy biến giao diện terminal | 31.9.1 |
+| `TXAVL.WinSCP` | `winscp` | WinSCP — SFTP, FTP, WebDAV client | 6.7.0 |
 
 Ví dụ: `txapm install vlc` hoặc `txapm install TXAVL.VLC`. Danh sách đầy đủ và mới nhất: `txapm search "" `
 hoặc xem [trang chỉ mục](https://txavl.github.io/txa-repo/). Mỗi gói chỉ trỏ tới link tải **chính thức** của nhà
@@ -227,6 +238,7 @@ Mọi thông tin cũ được giữ nguyên, chỉ thay link và phiên bản.
 | `txacreate token --store` | cấp quyền GitHub trước, không đợi tới lúc gửi |
 | `txacreate token --clear` | quên quyền đã lưu (đăng xuất) |
 | `txacreate new <link> -t <PAT>` | dùng Personal Access Token cho lần này, không lưu (hoặc đặt biến `TXA_TOKEN`) |
+| `.\scripts\winget-import.ps1 <id>` | chuyển đổi & nhập package từ WinGet vào TXA (xem [docs/winget-import.md](docs/winget-import.md)) |
 
 Chủ kho muốn bot hiện tên riêng (`txa-repo[bot]`) thay vì `github-actions` thì làm theo [docs/github-app.md](docs/github-app.md).
 
