@@ -1,0 +1,74 @@
+# TXA Auto-Update - periodically checks upstream sources (WinGet & antigravity.google)
+# and updates all managed TXAVL packages in manifests/t/TXAVL/ to their newest versions.
+#
+# Hand-written packages (CanhCutTeamLauncher, TXAWinSetup, Warframe, or any manifest
+# containing `auto-update: false` / `hand-written`) and third-party contributor
+# namespaces outside TXAVL are untouched.
+name: TXA Auto-Update (TXAVL)
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Optional single package to check (e.g. Chrome or AntigravityIDE; leave empty for all TXAVL)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: txa-auto-update
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Auto-update TXAVL manifests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install TXA toolchain
+        run: python -m pip install --disable-pip-version-check ./tools
+
+      - name: Refresh WinGet source
+        shell: pwsh
+        run: winget source update --disable-interactivity | Out-Null
+
+      - name: Sync TXAVL packages to latest upstream versions
+        shell: pwsh
+        env:
+          PKG_FILTER: ${{ inputs.package }}
+        run: |
+          if ($env:PKG_FILTER) {
+            txacli sync $env:PKG_FILTER --namespace TXAVL
+          } else {
+            txacli sync --namespace TXAVL
+          }
+
+      - name: Commit & push updated manifests
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "txa-bot[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifests/t/TXAVL
+          $status = git status --porcelain manifests/t/TXAVL
+          if (-not $status) {
+            Write-Host "All TXAVL packages are already at the latest version."
+            exit 0
+          }
+          git commit -m "chore(manifests): auto-update TXAVL packages to latest upstream versions"
+          git push origin HEAD:main
+          gh workflow run txa-publish-api.yml
+

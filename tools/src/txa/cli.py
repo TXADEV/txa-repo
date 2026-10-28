@@ -175,6 +175,28 @@ def main(argv: list[str] | None = None) -> int:
         if first in ("scan", "installed", "ls") and len(args_list) == 1:
             do_scan(_resolve_repo_root(None))
             return 0
+        if first in ("sync", "update-all", "auto-update"):
+            ap = console.SmartArgumentParser(prog="txacli sync", description="Auto-update all managed TXAVL packages in repo")
+            ap.add_argument("package", nargs="?", default=None, help="Optional single package to check (e.g. Chrome)")
+            ap.add_argument("-r", "--repo", default=None, help="Repository root containing manifests/ (default: current repo)")
+            ap.add_argument("-n", "--namespace", default="TXAVL", help="Namespace to auto-update (default: TXAVL)")
+            ap.add_argument("--keep-old", action="store_true", help="Keep older version directories when updating")
+            ap.add_argument("--dry-run", action="store_true", help="Check for updates without writing files")
+            parsed = ap.parse_args(args_list[1:])
+            root = _resolve_repo_root(parsed.repo)
+            console.say(f"\nChecking upstream updates for namespace '{parsed.namespace}' in {root}...")
+            res = wg.sync_txavl_packages(
+                root,
+                namespace=parsed.namespace,
+                keep_old=parsed.keep_old,
+                dry_run=parsed.dry_run,
+                only_filter=parsed.package,
+            )
+            console.say(
+                f"\n✓ Sync summary: {len(res['updated'])} updated, "
+                f"{len(res['up_to_date'])} up-to-date, {len(res['skipped'])} skipped (hand-written/pinned)."
+            )
+            return 1 if res["failed"] else 0
         if first in ("submit", "pr", "push"):
             from txa.create.cli import main as txacreate_main
 
@@ -199,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             "commands:\n"
             "  txacli search <query>              search WinGet packages (or: txacli -s <query>)\n"
             "  txacli [import] <pkg> [<pkg2>...]  convert WinGet package(s) into TXA manifests\n"
+            "  txacli sync [<pkg>] [--dry-run]    auto-update all TXAVL packages (skips hand-written ones)\n"
             "  txacli scan                        scan installed PC apps available on WinGet\n"
             "  txacli -i [-y]                     scan PC & import missing apps into TXA\n"
             "  txacli build-api [-r DIR] [-o DIR] build static txa.v1 REST API from manifests/\n"

@@ -709,3 +709,257 @@ def save_draft_manifests(draft, root_dir, dry_run: bool = False):
         (target_dir / filename).write_text(content_lf, encoding="utf-8", newline="\n")
     return target_dir
 
+
+# Hand-written / non-WinGet packages that must NEVER be overwritten by automatic WinGet sync
+_HANDWRITTEN_APPS = {
+    "CanhCutTeamLauncher",
+    "TXAWinSetup",
+    "Warframe",
+}
+
+# Deterministic mapping from TXAVL AppName -> exact WinGet PackageIdentifier
+_TXAVL_WINGET_MAP: dict[str, str] = {
+    "Audacity": "Audacity.Audacity",
+    "Brave": "Brave.Brave",
+    "Chrome": "Google.Chrome.EXE",
+    "Claude": "Anthropic.Claude",
+    "Cloudflared": "Cloudflare.cloudflared",
+    "CocCoc": "CocCoc.CocCoc",
+    "Discord": "Discord.Discord",
+    "Edge": "Microsoft.Edge",
+    "FFmpeg": "Gyan.FFmpeg.Essentials",
+    "Firefox": "Mozilla.Firefox",
+    "Garena": "Garena.Garena",
+    "GIMP": "GIMP.GIMP.3",
+    "Git": "Git.Git",
+    "GitHubCLI": "GitHub.cli",
+    "GitHubDesktop": "GitHub.GitHubDesktop",
+    "MicrosoftBuildOfOpenJDKWithHotspot17": "Microsoft.OpenJDK.17",
+    "MicrosoftNETSDK": "Microsoft.DotNet.SDK.10",
+    "MicrosoftNETWindowsDesktopRuntime": "Microsoft.DotNet.DesktopRuntime.8",
+    "NodeJS": "OpenJS.NodeJS.LTS",
+    "NotepadPlusPlus": "Notepad++.Notepad++",
+    "NSIS": "NSIS.NSIS",
+    "NTLite": "Nlitesoft.NTLite",
+    "NVM": "CoreyButler.NVMforWindows",
+    "Obsidian": "Obsidian.Obsidian",
+    "OBSStudio": "OBSProject.OBSStudio",
+    "OhMyPosh": "JanDeDobbeleer.OhMyPosh",
+    "OneDrive": "Microsoft.OneDrive",
+    "PhysX": "Nvidia.PhysX",
+    "Postman": "Postman.Postman",
+    "PowerToys": "Microsoft.PowerToys",
+    "PuTTY": "PuTTY.PuTTY",
+    "Python": "Python.Python.3.14",
+    "QEMUGuestAgent": "RedHat.QemuGA",
+    "RockstarGamesLauncher": "RockstarGames.Launcher",
+    "Rustup": "Rustlang.Rustup",
+    "SevenZip": "7zip.7zip",
+    "ShareX": "ShareX.ShareX",
+    "Spotify": "Spotify.Spotify",
+    "Steam": "Valve.Steam",
+    "Sunshine": "LizardByte.Sunshine",
+    "TelegramDesktop": "Telegram.TelegramDesktop",
+    "UbisoftConnect": "Ubisoft.Connect",
+    "Unity": "Unity.Unity.2020",
+    "UnityHub": "Unity.UnityHub",
+    "ViGEmBus": "Nefarius.ViGEmBus",
+    "VisualStudioCode": "Microsoft.VisualStudioCode",
+    "VisualStudioCommunity2026": "Microsoft.VisualStudio.Community",
+    "VLC": "VideoLAN.VLC",
+    "WinSCP": "WinSCP.WinSCP",
+}
+
+
+def _check_antigravity_ide_upstream() -> tuple[str, dict[str, str]] | None:
+    """Scrape https://antigravity.google/download for the latest stable Windows x64/arm64 URLs."""
+    from txa.core import net
+
+    try:
+        resp = net.session().get("https://antigravity.google/download", timeout=15)
+        if resp.status_code != 200:
+            return None
+        text = resp.text
+        m_x64 = re.search(
+            r"(https://edgedl\.me\.gvt1\.com/edgedl/release2/[^\"'\s]+/antigravity/stable/([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+/windows-x64/Antigravity%20IDE\.exe)",
+            text,
+        )
+        m_arm64 = re.search(
+            r"(https://edgedl\.me\.gvt1\.com/edgedl/release2/[^\"'\s]+/antigravity/stable/[0-9]+\.[0-9]+\.[0-9]+-[0-9]+/windows-arm64/Antigravity%20IDE\.exe)",
+            text,
+        )
+        if not m_x64:
+            return None
+        ver = normalize_version(m_x64.group(2))
+        urls = {"x64": m_x64.group(1)}
+        if m_arm64:
+            urls["arm64"] = m_arm64.group(1)
+        return ver, urls
+    except Exception:
+        return None
+
+
+def sync_txavl_packages(
+    repo_root,
+    namespace: str = "TXAVL",
+    keep_old: bool = False,
+    dry_run: bool = False,
+    only_filter: str | None = None,
+) -> dict[str, Any]:
+    """Automatically check and update all managed ``TXAVL`` packages in ``repo_root`` to their latest upstream version.
+
+    Skips hand-written packages and any package outside ``namespace`` so community/manual manifests are untouched.
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path
+    from txa.core import console, net, semver
+    from txa.core.manifest import Bundle
+    from txa.create.draft import Draft, TargetDraft
+
+    root = Path(repo_root)
+    ns_dir = root / "manifests" / namespace[0].lower() / namespace
+    updated: list[str] = []
+    up_to_date: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+
+    if not ns_dir.is_dir():
+        return {"updated": updated, "up_to_date": up_to_date, "skipped": skipped, "failed": failed}
+
+    for app_dir in sorted(ns_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not app_dir.is_dir() or app_dir.name.startswith("."):
+            continue
+        app_name = app_dir.name
+        pkg_id = f"{namespace}.{app_name}"
+        if only_filter and only_filter.lower() not in (app_name.lower(), pkg_id.lower()):
+            continue
+
+        ver_dirs = [d for d in app_dir.iterdir() if d.is_dir() and semver.is_valid(d.name)]
+        if not ver_dirs:
+            continue
+        ver_dirs.sort(key=lambda d: semver.parse(d.name))
+        latest_dir = ver_dirs[-1]
+        current_ver = latest_dir.name
+
+        core_path = latest_dir / "core.txa.yaml"
+        raw_core = core_path.read_text("utf-8") if core_path.is_file() else ""
+        if app_name in _HANDWRITTEN_APPS or "hand-written" in raw_core.lower() or "auto-update: false" in raw_core.lower():
+            console.say(f"  {console.paint('[SKIP]', 'yellow')} {pkg_id}@{current_ver} (hand-written / pinned)")
+            skipped.append(pkg_id)
+            continue
+
+        bundle = Bundle.read(latest_dir)
+        prev_core = bundle.core or {}
+        prev_about = bundle.default_about() or {}
+        prev_pkg = prev_core.get("package") or {}
+
+        # Special handler for AntigravityIDE (direct from antigravity.google/download)
+        if app_name == "AntigravityIDE":
+            ag = _check_antigravity_ide_upstream()
+            if not ag:
+                skipped.append(pkg_id)
+                continue
+            new_ver, ag_urls = ag
+            if semver.parse(new_ver) <= semver.parse(current_ver):
+                console.say(f"  {console.paint('[OK]', 'gray')}   {pkg_id}@{current_ver}")
+                up_to_date.append(pkg_id)
+                continue
+            console.say(f"  {console.paint('[UP]', 'green', 'bold')}   {pkg_id}: {current_ver} -> {new_ver}")
+            if not dry_run:
+                work = Path(tempfile.mkdtemp(prefix="ag-sync-", dir=config.temp_root()))
+                targets: list[TargetDraft] = []
+                for arch, url in ag_urls.items():
+                    dl = net.download(net.session(), url, work / f"ag-{arch}.exe", 4 * 1024 * 1024 * 1024)
+                    targets.append(TargetDraft(
+                        url=url,
+                        arch=arch,
+                        engine="inno",
+                        sha256=dl.sha256,
+                        size=1,
+                        payload=Path(""),
+                        switches=dict(DEFAULT_SWITCHES["inno"]),
+                        portable={},
+                    ))
+                lic = prev_about.get("license") or {}
+                draft = Draft(
+                    package_id=pkg_id,
+                    version=new_ver,
+                    name=prev_about.get("name", "Antigravity IDE"),
+                    publisher=prev_about.get("publisher", "Google"),
+                    author=prev_about.get("author", "Google LLC"),
+                    summary=prev_about.get("summary", ""),
+                    description=prev_about.get("description"),
+                    homepage=prev_about.get("homepage"),
+                    license_name=lic.get("name", "Proprietary"),
+                    license_url=lic.get("url"),
+                    alias=prev_pkg.get("alias"),
+                    aliases=prev_pkg.get("aliases", []),
+                    tags=prev_core.get("tags", []),
+                    targets=targets,
+                )
+                save_draft_manifests(draft, root, dry_run=False)
+                if not keep_old:
+                    for old_d in ver_dirs:
+                        if old_d.name != new_ver:
+                            shutil.rmtree(old_d, ignore_errors=True)
+            updated.append(f"{pkg_id} ({current_ver} -> {new_ver})")
+            continue
+
+        # Standard WinGet-backed TXAVL package
+        wg_id = _TXAVL_WINGET_MAP.get(app_name) or resolve_to_winget_id(prev_about.get("name") or app_name)
+        if not wg_id:
+            console.say(f"  {console.paint('[SKIP]', 'yellow')} {pkg_id}@{current_ver} (not on WinGet)")
+            skipped.append(pkg_id)
+            continue
+
+        data = query_winget_package(wg_id)
+        if not data:
+            console.say(f"  {console.paint('[SKIP]', 'yellow')} {pkg_id}@{current_ver} (no HTTPS installer on WinGet)")
+            skipped.append(pkg_id)
+            continue
+
+        new_ver = normalize_version(str(data.get("Version") or current_ver))
+        if semver.parse(new_ver) <= semver.parse(current_ver):
+            console.say(f"  {console.paint('[OK]', 'gray')}   {pkg_id}@{current_ver}")
+            up_to_date.append(pkg_id)
+            continue
+
+        draft = convert_winget_to_draft(data, namespace=namespace, override_id=pkg_id)
+        # Preserve curated metadata from the existing TXAVL manifest
+        if prev_pkg.get("alias"):
+            draft.alias = prev_pkg["alias"]
+        if prev_pkg.get("aliases"):
+            draft.aliases = list(prev_pkg["aliases"])
+        if prev_core.get("tags"):
+            draft.tags = list(prev_core["tags"])
+        if prev_about.get("name"):
+            draft.name = prev_about["name"]
+        if prev_about.get("summary"):
+            draft.summary = prev_about["summary"]
+        if prev_about.get("description"):
+            draft.description = prev_about["description"]
+        if prev_about.get("homepage"):
+            draft.homepage = prev_about["homepage"]
+        prev_lic = prev_about.get("license") or {}
+        if prev_lic.get("name"):
+            draft.license_name = prev_lic["name"]
+            draft.license_url = prev_lic.get("url")
+
+        errs = validate_draft(draft)
+        if errs:
+            console.say(f"  {console.paint('[FAIL]', 'red')} {pkg_id}@{new_ver}: {'; '.join(errs)}")
+            failed.append(pkg_id)
+            continue
+
+        console.say(f"  {console.paint('[UP]', 'green', 'bold')}   {pkg_id}: {current_ver} -> {new_ver} (from {wg_id})")
+        save_draft_manifests(draft, root, dry_run=dry_run)
+        if not dry_run and not keep_old:
+            for old_d in ver_dirs:
+                if old_d.name != new_ver:
+                    shutil.rmtree(old_d, ignore_errors=True)
+        updated.append(f"{pkg_id} ({current_ver} -> {new_ver})")
+
+    return {"updated": updated, "up_to_date": up_to_date, "skipped": skipped, "failed": failed}
+
+
